@@ -33,17 +33,19 @@ export default async function TaxesPage({
     };
   }
 
-  const [sales, expenses] = await Promise.all([
+  const [sales, expenses, trades] = await Promise.all([
     prisma.sale.findMany({ where: dateFilter }),
     prisma.expense.findMany({ where: dateFilter }),
+    prisma.trade.findMany({ where: dateFilter }),
   ]);
 
   const grossRevenue = sales.reduce((s, x) => s + x.salePrice, 0);
   const cogs = sales.reduce((s, x) => s + x.costBasisAtSale, 0);
   const sellingCosts = sales.reduce((s, x) => s + x.fees + x.shipping, 0);
   const operatingExpenses = expenses.reduce((s, x) => s + x.amount, 0);
+  const tradeGains = trades.reduce((s, x) => s + x.realizedGain, 0);
   const netProfit =
-    grossRevenue - cogs - sellingCosts - operatingExpenses;
+    grossRevenue - cogs - sellingCosts + tradeGains - operatingExpenses;
 
   const r = estimateTaxes({
     netProfit,
@@ -127,6 +129,9 @@ export default async function TaxesPage({
           <Row label="Gross revenue" value={money(grossRevenue)} />
           <Row label="− Cost of goods sold" value={money(-cogs)} />
           <Row label="− Selling costs (fees + shipping)" value={money(-sellingCosts)} />
+          {tradeGains > 0 && (
+            <Row label="+ Trade gains (cash over basis)" value={money(tradeGains)} />
+          )}
           <Row label="− Operating expenses" value={money(-operatingExpenses)} />
           <div className="my-2 border-t border-slate-200" />
           <Row label="Business net profit" value={money(netProfit)} bold />
