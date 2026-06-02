@@ -7,11 +7,14 @@ import { createExpense, deleteExpense } from "./actions";
 const CATEGORIES = [
   "Supplies",
   "Shipping",
+  "Tariffs & Duties",
   "Grading fees",
   "Marketplace fees",
   "Software",
   "Travel",
   "Inventory (COGS)",
+  "Salaries & Wages",
+  "Commissions",
   "Other",
 ];
 
