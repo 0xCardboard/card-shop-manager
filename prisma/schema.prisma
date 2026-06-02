@@ -1,0 +1,141 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  STAFF
+}
+
+enum ItemStatus {
+  IN_STOCK
+  LISTED
+  SOLD
+  RESERVED
+}
+
+enum LeadStage {
+  PROSPECT
+  CONTACTED
+  NEGOTIATING
+  WON
+  LOST
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(STAFF)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model InventoryItem {
+  id              String     @id @default(cuid())
+  name            String
+  setName         String?
+  year            Int?
+  cardNumber      String?
+  condition       String?    // Raw condition e.g. NM, LP
+  graded          Boolean    @default(false)
+  gradingCompany  String?    // PSA, BGS, CGC, SGC
+  grade           String?    // e.g. 9, 9.5, 10
+  certNumber      String?
+  quantity        Int        @default(0)
+  costBasis       Float      @default(0) // average per-unit cost
+  acquisitionDate DateTime?
+  status          ItemStatus @default(IN_STOCK)
+  sku             String?
+  notes           String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  purchases Purchase[]
+  sales     Sale[]
+}
+
+model Purchase {
+  id          String   @id @default(cuid())
+  date        DateTime @default(now())
+  source      String?  // where it was bought
+  itemName    String
+  quantity    Int      @default(1)
+  unitCost    Float    @default(0)
+  fees        Float    @default(0)
+  shipping    Float    @default(0)
+  total       Float    @default(0) // quantity*unitCost + fees + shipping
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  inventoryItem   InventoryItem? @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+  inventoryItemId String?
+}
+
+model Sale {
+  id              String   @id @default(cuid())
+  date            DateTime @default(now())
+  quantity        Int      @default(1)
+  salePrice       Float    @default(0) // gross per-unit price * qty (gross revenue)
+  fees            Float    @default(0)
+  shipping        Float    @default(0) // shipping cost you paid
+  platform        String?  // eBay, Whatnot, in-person, etc.
+  costBasisAtSale Float    @default(0) // total COGS for this sale
+  profit          Float    @default(0) // salePrice - fees - shipping - costBasisAtSale
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  inventoryItem   InventoryItem? @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+  inventoryItemId String?
+  customer        Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerId      String?
+}
+
+model Expense {
+  id        String   @id @default(cuid())
+  date      DateTime @default(now())
+  category  String   // Supplies, Shipping, Grading fees, Software, Travel, Fees, Other
+  amount    Float    @default(0)
+  vendor    String?
+  notes     String?
+  createdAt DateTime @default(now())
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  type      String?  // Collector, Reseller, Wholesale, VIP
+  tags      String?  // comma separated
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sales Sale[]
+  leads Lead[]
+}
+
+model Lead {
+  id           String    @id @default(cuid())
+  title        String
+  contactName  String?
+  contactInfo  String?   // email/phone if not a saved customer
+  interestedIn String?
+  stage        LeadStage @default(PROSPECT)
+  value        Float     @default(0) // estimated deal value
+  followUpDate DateTime?
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerId String?
+}
