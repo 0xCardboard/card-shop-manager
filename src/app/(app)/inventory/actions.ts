@@ -7,30 +7,6 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { intNum, num, optDate, optStr, str } from "@/lib/utils";
 
-export async function createItem(formData: FormData) {
-  await requireSession();
-  await prisma.inventoryItem.create({
-    data: {
-      name: str(formData.get("name")),
-      setName: optStr(formData.get("setName")),
-      year: formData.get("year") ? intNum(formData.get("year")) : null,
-      cardNumber: optStr(formData.get("cardNumber")),
-      condition: optStr(formData.get("condition")),
-      graded: str(formData.get("graded")) === "on",
-      gradingCompany: optStr(formData.get("gradingCompany")),
-      grade: optStr(formData.get("grade")),
-      certNumber: optStr(formData.get("certNumber")),
-      quantity: intNum(formData.get("quantity")),
-      costBasis: num(formData.get("costBasis")),
-      acquisitionDate: optDate(formData.get("acquisitionDate")),
-      sku: optStr(formData.get("sku")),
-      status: (str(formData.get("status")) as ItemStatus) || "IN_STOCK",
-      notes: optStr(formData.get("notes")),
-    },
-  });
-  revalidatePath("/inventory");
-}
-
 export async function updateItem(formData: FormData) {
   await requireSession();
   const id = str(formData.get("id"));

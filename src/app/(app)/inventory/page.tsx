@@ -4,7 +4,7 @@ import SubmitOnChange from "@/components/SubmitOnChange";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { fmtDate, money } from "@/lib/utils";
-import { createItem, deleteItem, updateStatus } from "./actions";
+import { deleteItem, updateStatus } from "./actions";
 
 const STATUS_OPTS = [
   { value: "IN_STOCK", label: "In stock" },
@@ -43,56 +43,17 @@ export default async function InventoryPage() {
         <Stat label="Low stock (≤1)" value={lowStock.toString()} />
       </div>
 
-      <details className="card mb-6 p-5">
-        <summary className="cursor-pointer text-sm font-semibold text-slate-700">
-          + Add inventory item
-        </summary>
-        <form
-          action={createItem}
-          className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4"
-        >
-          <Field label="Card name" name="name" required full />
-          <Field label="Set" name="setName" />
-          <Field label="Year" name="year" type="number" />
-          <Field label="Card #" name="cardNumber" />
-          <Field label="Condition (raw)" name="condition" placeholder="NM, LP…" />
-          <div>
-            <label className="label">Graded?</label>
-            <label className="flex items-center gap-2 py-2 text-sm">
-              <input type="checkbox" name="graded" /> Graded
-            </label>
-          </div>
-          <Field label="Grader" name="gradingCompany" placeholder="PSA, BGS…" />
-          <Field label="Grade" name="grade" placeholder="10, 9.5…" />
-          <Field label="Cert #" name="certNumber" />
-          <Field label="SKU" name="sku" />
-          <Field label="Quantity" name="quantity" type="number" defaultValue="1" />
-          <Field
-            label="Cost / unit"
-            name="costBasis"
-            type="number"
-            step="0.01"
-            defaultValue="0"
-          />
-          <Field label="Acquired" name="acquisitionDate" type="date" />
-          <div>
-            <label className="label">Status</label>
-            <select name="status" className="input" defaultValue="IN_STOCK">
-              {STATUS_OPTS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <Field label="Notes" name="notes" full />
-          <div className="col-span-2 sm:col-span-4">
-            <button className="btn-primary" type="submit">
-              Add item
-            </button>
-          </div>
-        </form>
-      </details>
+      <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
+        Inventory is created automatically when you{" "}
+        <a href="/purchases" className="font-medium text-brand-700">
+          log a purchase
+        </a>
+        , break an item down, or receive items in a{" "}
+        <a href="/trades" className="font-medium text-brand-700">
+          trade
+        </a>
+        . Items can&apos;t be added here directly.
+      </div>
 
       <div className="card overflow-x-auto">
         <table className="w-full min-w-[820px]">
@@ -112,7 +73,7 @@ export default async function InventoryPage() {
             {items.length === 0 && (
               <tr>
                 <td className="td text-slate-400" colSpan={8}>
-                  No items yet. Add your first card above.
+                  No items yet. Log a purchase to add inventory.
                 </td>
               </tr>
             )}
@@ -179,41 +140,6 @@ function Stat({ label, value }: { label: string; value: string }) {
     <div className="card p-4">
       <div className="text-xs text-slate-500">{label}</div>
       <div className="mt-1 text-xl font-semibold">{value}</div>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  name,
-  type = "text",
-  placeholder,
-  required,
-  full,
-  step,
-  defaultValue,
-}: {
-  label: string;
-  name: string;
-  type?: string;
-  placeholder?: string;
-  required?: boolean;
-  full?: boolean;
-  step?: string;
-  defaultValue?: string;
-}) {
-  return (
-    <div className={full ? "col-span-2 sm:col-span-4" : ""}>
-      <label className="label">{label}</label>
-      <input
-        name={name}
-        type={type}
-        step={step}
-        placeholder={placeholder}
-        required={required}
-        defaultValue={defaultValue}
-        className="input"
-      />
     </div>
   );
 }

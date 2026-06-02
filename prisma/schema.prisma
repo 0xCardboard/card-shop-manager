@@ -60,6 +60,7 @@ model InventoryItem {
 
   purchases Purchase[]
   sales     Sale[]
+  tradeLegs TradeLeg[]
 }
 
 model Purchase {
@@ -138,4 +139,39 @@ model Lead {
 
   customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
   customerId String?
+}
+
+// A trade swaps inventory items (and optionally cash) for other items. The
+// cost basis of the items you give up is pooled, adjusted for cash, and
+// passed through to the items you receive, so total cost basis is conserved.
+model Trade {
+  id            String   @id @default(cuid())
+  date          DateTime @default(now())
+  counterparty  String?  // who you traded with
+  cashIn        Float    @default(0) // cash you received in the trade
+  cashOut       Float    @default(0) // cash you paid in the trade
+  givenBasis    Float    @default(0) // total cost basis of items given (snapshot)
+  receivedBasis Float    @default(0) // net basis passed to items received
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  legs TradeLeg[]
+}
+
+// One side of a trade: an item given away (GAVE) or received (RECEIVED).
+model TradeLeg {
+  id        String @id @default(cuid())
+  direction String // GAVE | RECEIVED
+  itemName  String
+  quantity  Int    @default(1)
+  basis     Float  @default(0) // cost basis attributed to this leg
+
+  trade   Trade  @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  tradeId String
+
+  inventoryItem   InventoryItem? @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+  inventoryItemId String?
+
+  @@index([tradeId])
+  @@index([inventoryItemId])
 }
