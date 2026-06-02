@@ -9,10 +9,11 @@ export default async function DashboardPage() {
   const now = new Date();
   const yearStart = new Date(now.getFullYear(), 0, 1);
 
-  const [salesYTD, expensesYTD, inventory, customers, upcomingLeads] =
+  const [salesYTD, expensesYTD, tradesYTD, inventory, customers, upcomingLeads] =
     await Promise.all([
       prisma.sale.findMany({ where: { date: { gte: yearStart } } }),
       prisma.expense.findMany({ where: { date: { gte: yearStart } } }),
+      prisma.trade.findMany({ where: { date: { gte: yearStart } } }),
       prisma.inventoryItem.findMany(),
       prisma.customer.findMany({ include: { sales: true } }),
       prisma.lead.findMany({
@@ -27,7 +28,8 @@ export default async function DashboardPage() {
   const cogs = salesYTD.reduce((s, x) => s + x.costBasisAtSale, 0);
   const selling = salesYTD.reduce((s, x) => s + x.fees + x.shipping, 0);
   const opex = expensesYTD.reduce((s, x) => s + x.amount, 0);
-  const grossProfit = revenue - cogs - selling;
+  const tradeGains = tradesYTD.reduce((s, x) => s + x.realizedGain, 0);
+  const grossProfit = revenue - cogs - selling + tradeGains;
   const netProfit = grossProfit - opex;
   const invValue = inventory.reduce(
     (s, i) => (i.status === "SOLD" ? s : s + i.quantity * i.costBasis),

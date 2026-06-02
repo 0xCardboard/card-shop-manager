@@ -152,6 +152,7 @@ model Trade {
   cashOut       Float    @default(0) // cash you paid in the trade
   givenBasis    Float    @default(0) // total cost basis of items given (snapshot)
   receivedBasis Float    @default(0) // net basis passed to items received
+  realizedGain  Float    @default(0) // cash received above basis given (taxable income)
   notes         String?
   createdAt     DateTime @default(now())
 

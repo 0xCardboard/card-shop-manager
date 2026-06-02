@@ -64,10 +64,17 @@ export default async function TradesPage() {
                     <div className="text-xs text-slate-500">{t.notes}</div>
                   )}
                 </div>
-                <form action={deleteTrade}>
-                  <input type="hidden" name="id" value={t.id} />
-                  <button className="btn-danger py-1 text-xs">Delete</button>
-                </form>
+                <div className="flex items-center gap-3">
+                  {t.realizedGain > 0 && (
+                    <span className="badge bg-emerald-100 text-emerald-700">
+                      Gain {money(t.realizedGain)}
+                    </span>
+                  )}
+                  <form action={deleteTrade}>
+                    <input type="hidden" name="id" value={t.id} />
+                    <button className="btn-danger py-1 text-xs">Delete</button>
+                  </form>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

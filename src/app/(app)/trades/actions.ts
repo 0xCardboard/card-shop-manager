@@ -69,6 +69,9 @@ export async function createTrade(formData: FormData) {
   const givenBasis = givenResolved.reduce((s, g) => s + g.basis, 0);
   // Net cost basis to pass through to the items received.
   const receivedBasis = Math.max(0, givenBasis + cashOut - cashIn);
+  // If cash received exceeds the basis given (plus any cash paid), the excess
+  // is a realized gain — taxable income, like a partial sale.
+  const realizedGain = Math.max(0, cashIn - cashOut - givenBasis);
 
   // Distribute the net basis across received items, weighted by the estimated
   // value entered (or evenly by quantity if no values were provided).
@@ -89,6 +92,7 @@ export async function createTrade(formData: FormData) {
         cashOut,
         givenBasis,
         receivedBasis,
+        realizedGain,
         notes,
       },
     });
