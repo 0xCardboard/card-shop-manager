@@ -12,6 +12,8 @@ const CATEGORIES = [
   "Software",
   "Travel",
   "Inventory (COGS)",
+  "Salaries & Wages",
+  "Commissions",
   "Other",
 ];
 
