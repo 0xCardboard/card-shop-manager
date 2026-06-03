@@ -53,6 +53,14 @@ export default async function EditInventoryPage({
         <F label="Grade" name="grade" defaultValue={item.grade} />
         <F label="Cert #" name="certNumber" defaultValue={item.certNumber} />
         <F label="SKU" name="sku" defaultValue={item.sku} />
+        <div>
+          <label className="label">Internal SKU</label>
+          <input
+            value={item.internalSku ?? "—"}
+            readOnly
+            className="input bg-slate-50 font-mono text-xs text-slate-500"
+          />
+        </div>
         <F label="Quantity" name="quantity" type="number" defaultValue={item.quantity.toString()} />
         <F label="Cost / unit" name="costBasis" type="number" step="0.01" defaultValue={item.costBasis.toString()} />
         <F label="Acquired" name="acquisitionDate" type="date" defaultValue={toDateInput(item.acquisitionDate)} />

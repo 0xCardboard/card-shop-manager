@@ -16,7 +16,10 @@ database.
   revenue chart, top customers, and open follow-ups.
 - **Inventory** — trading-card fields (set, year, card #, condition, grading
   company / grade / cert #, SKU), quantity, cost basis, status. Add / edit /
-  delete, quick status changes, value rollups.
+  delete, quick status changes, value rollups. Two tabs: **In stock** (active
+  items) and **History** (everything sold or broken down). Each item gets an
+  auto-generated **internal SKU** (`CSM-000123`); broken-down units inherit a
+  child SKU (`CSM-000123-B01`) that ties them back to the parent they came from.
 - **Purchases** — log buys; optionally link to an existing item (auto-increments
   stock and recomputes weighted-average cost) or auto-create a new item.
 - **Sales** — record sales linked to inventory and a customer; auto-reduces
@@ -48,6 +51,12 @@ The app conserves cost basis: the opened cost is split evenly across the new
 units (here, $100/box), so total inventory value and all future profit/COGS math
 stay correct. Merging into an item that already has stock uses weighted-average
 cost. The parent's quantity is reduced by the number of units you opened.
+
+When the parent is fully opened (quantity hits zero) it moves out of the **In
+stock** tab and into **History**, marked **Broken down**, where it lists the
+units it was opened into (by internal SKU). The new units stay active in stock.
+Likewise, when an item is fully sold it moves to **History** marked **Sold**,
+showing its sale details (price, profit, platform, customer).
 
 ### Exporting data
 
