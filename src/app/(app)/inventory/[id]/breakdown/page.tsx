@@ -21,6 +21,7 @@ export default async function BreakdownPage({
     where: {
       id: { not: parent.id },
       status: { in: ["IN_STOCK", "LISTED", "RESERVED"] },
+      location: parent.location, // only merge within the same location
     },
     orderBy: { name: "asc" },
   });

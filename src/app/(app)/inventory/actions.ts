@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { ItemStatus } from "@prisma/client";
+import { ItemStatus, InventoryLocation } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { intNum, num, optDate, optStr, str } from "@/lib/utils";
@@ -28,6 +28,8 @@ export async function updateItem(formData: FormData) {
       acquisitionDate: optDate(formData.get("acquisitionDate")),
       sku: optStr(formData.get("sku")),
       status: (str(formData.get("status")) as ItemStatus) || "IN_STOCK",
+      location:
+        (str(formData.get("location")) as InventoryLocation) || "US",
       notes: optStr(formData.get("notes")),
     },
   });
@@ -136,6 +138,7 @@ export async function breakDownItem(formData: FormData) {
           costBasis: childUnitCost,
           acquisitionDate: parent.acquisitionDate,
           status: "IN_STOCK",
+          location: parent.location, // children stay where the parent was opened
           internalSku: childInternalSku(parentSku, childCount + 1),
           parentItemId: parent.id,
           notes: `Broken down from "${parent.name}" (${parentSku})`,
@@ -146,4 +149,119 @@ export async function breakDownItem(formData: FormData) {
 
   revalidatePath("/inventory");
   redirect("/inventory");
+}
+
+// Ship a batch of selected Brazil items to the US. The shipping + tariff + fee
+// costs are landed costs: they are spread across the shipped items (weighted by
+// each item's cost value) and folded into the item's cost basis, then the items
+// are moved to the US. A Shipment record snapshots what moved and what it cost.
+export async function shipToUS(formData: FormData) {
+  await requireSession();
+
+  const itemIds = formData.getAll("itemId").map(str).filter(Boolean);
+  if (itemIds.length === 0) {
+    throw new Error("Select at least one item in Brazil to ship.");
+  }
+
+  const shipping = Math.max(0, num(formData.get("shipping")));
+  const tariffs = Math.max(0, num(formData.get("tariffs")));
+  const fees = Math.max(0, num(formData.get("fees")));
+  const landedTotal = shipping + tariffs + fees;
+  const date = optDate(formData.get("date")) ?? new Date();
+  const reference = optStr(formData.get("reference"));
+  const notes = optStr(formData.get("notes"));
+
+  const items = await prisma.inventoryItem.findMany({
+    where: { id: { in: itemIds }, location: "BRAZIL" },
+  });
+  if (items.length === 0) {
+    throw new Error("None of the selected items are currently in Brazil.");
+  }
+
+  // Distribute landed cost by cost value (ad-valorem style), falling back to
+  // an even per-unit split when there is no cost basis to weight against.
+  const totalValue = items.reduce((s, i) => s + i.quantity * i.costBasis, 0);
+  const totalUnits = items.reduce((s, i) => s + i.quantity, 0);
+
+  await prisma.$transaction(async (tx) => {
+    const shipment = await tx.shipment.create({
+      data: { date, reference, shipping, tariffs, fees, notes },
+    });
+
+    for (const item of items) {
+      const weight =
+        totalValue > 0
+          ? (item.quantity * item.costBasis) / totalValue
+          : totalUnits > 0
+            ? item.quantity / totalUnits
+            : 0;
+      const landed = landedTotal * weight;
+      const perUnit = item.quantity > 0 ? landed / item.quantity : 0;
+
+      await tx.inventoryItem.update({
+        where: { id: item.id },
+        data: {
+          location: "US",
+          costBasis: item.costBasis + perUnit,
+        },
+      });
+
+      await tx.shipmentItem.create({
+        data: {
+          shipmentId: shipment.id,
+          itemName: item.name,
+          quantity: item.quantity,
+          landedCost: landed,
+          inventoryItemId: item.id,
+        },
+      });
+    }
+  });
+
+  revalidatePath("/inventory");
+  redirect("/inventory?tab=us");
+}
+
+// Delete a shipment and best-effort reverse it: move the items back to Brazil
+// and strip the landed cost back out of their cost basis.
+export async function deleteShipment(formData: FormData) {
+  await requireSession();
+  const id = str(formData.get("id"));
+
+  const shipment = await prisma.shipment.findUnique({
+    where: { id },
+    include: { items: true },
+  });
+  if (!shipment) return;
+
+  await prisma.$transaction(async (tx) => {
+    for (const leg of shipment.items) {
+      if (!leg.inventoryItemId) continue;
+      const item = await tx.inventoryItem.findUnique({
+        where: { id: leg.inventoryItemId },
+      });
+      // Only reverse items still sitting as active US stock — if an item has
+      // already been sold or broken down, leave it (its basis was used
+      // downstream and the sale snapshot is already booked).
+      if (
+        !item ||
+        item.location !== "US" ||
+        item.status === "SOLD" ||
+        item.status === "BROKEN_DOWN"
+      ) {
+        continue;
+      }
+      const perUnit = item.quantity > 0 ? leg.landedCost / item.quantity : 0;
+      await tx.inventoryItem.update({
+        where: { id: item.id },
+        data: {
+          location: "BRAZIL",
+          costBasis: Math.max(0, item.costBasis - perUnit),
+        },
+      });
+    }
+    await tx.shipment.delete({ where: { id: shipment.id } });
+  });
+
+  revalidatePath("/inventory");
 }

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { InventoryLocation } from "@prisma/client";
 import { intNum, num, optDate, optStr, str } from "@/lib/utils";
 import { nextInternalSku } from "@/lib/sku";
 
@@ -18,6 +19,8 @@ export async function createPurchase(formData: FormData) {
   const date = optDate(formData.get("date")) ?? new Date();
   const linkId = optStr(formData.get("inventoryItemId"));
   const addToInventory = str(formData.get("addToInventory")) === "on";
+  const location =
+    (str(formData.get("location")) as InventoryLocation) || "BRAZIL";
 
   let inventoryItemId: string | null = linkId;
 
@@ -43,6 +46,7 @@ export async function createPurchase(formData: FormData) {
         costBasis: unitCost,
         acquisitionDate: date,
         status: "IN_STOCK",
+        location,
         internalSku: await nextInternalSku(prisma),
       },
     });

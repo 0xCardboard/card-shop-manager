@@ -13,7 +13,7 @@ export default async function SalesPage() {
       take: 200,
     }),
     prisma.inventoryItem.findMany({
-      where: { quantity: { gt: 0 } },
+      where: { quantity: { gt: 0 }, location: "US" },
       orderBy: { name: "asc" },
     }),
     prisma.customer.findMany({ orderBy: { name: "asc" } }),
@@ -61,6 +61,10 @@ export default async function SalesPage() {
                 </option>
               ))}
             </select>
+            <p className="mt-1 text-xs text-slate-400">
+              Only items in US inventory can be sold. Ship items from Brazil
+              first.
+            </p>
           </div>
           <div>
             <label className="label">Quantity</label>
