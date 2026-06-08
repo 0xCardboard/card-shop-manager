@@ -148,7 +148,7 @@ export async function createTrade(formData: FormData) {
 
   revalidatePath("/trades");
   revalidatePath("/inventory");
-  redirect("/trades");
+  redirect("/inventory?tab=history");
 }
 
 // Delete a trade and best-effort reverse its inventory effects: restore the

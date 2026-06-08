@@ -14,20 +14,27 @@ database.
 
 - **Dashboard** — YTD revenue, gross/net profit, inventory value, monthly
   revenue chart, top customers, and open follow-ups.
-- **Inventory** — trading-card fields (set, year, card #, condition, grading
-  company / grade / cert #, SKU), quantity, cost basis, status. Add / edit /
-  delete, quick status changes, value rollups. Organized into lifecycle tabs:
-  **In Brazil**, **In US**, **Shipments**, and **History** (sold / broken
-  down). Each item gets an auto-generated **internal SKU** (`CSM-000123`);
-  broken-down units inherit a child SKU (`CSM-000123-B01`) that ties them back
-  to the parent they came from.
-- **Lifecycle / shipments** — track items from purchase in Brazil → shipment to
-  the US (with shipping + tariff/duty costs) → sale (see below).
-- **Purchases** — log buys; choose the **location** (Brazil / US); optionally
-  link to an existing item (auto-increments stock and recomputes
-  weighted-average cost) or auto-create a new item.
-- **Sales** — record sales linked to inventory and a customer; auto-reduces
-  stock and computes COGS + profit (price − fees − shipping − cost).
+- **Inventory** — the hub of the app. Trading-card fields (set, year, card #,
+  condition, grading company / grade / cert #, SKU), quantity, cost basis,
+  status. Organized into lifecycle tabs: **In Brazil**, **In US**, and
+  **History**. Purchases, sales, and trades are recorded right here via popup
+  buttons in the header (there are no separate Purchases/Sales/Trades pages).
+  Each item gets an auto-generated **internal SKU** (`CSM-000123`); broken-down
+  units inherit a child SKU (`CSM-000123-B01`) that ties them back to the parent.
+- **History (activity log)** — every purchase, sale, trade, shipment, and break
+  down in one timeline, each tagged by type and filterable. Sales appear
+  per-sale as they happen, even while stock remains (sell 1 of 10 → a sale of 1
+  shows in History and 9 stay in stock). Records can be deleted here, which
+  reverses their inventory effect.
+- **Purchases** — recorded from the Inventory header (**+ Purchase**); choose the
+  **location** (Brazil / US); optionally link to an existing item
+  (auto-increments stock and recomputes weighted-average cost) or auto-create a
+  new item.
+- **Sales** — recorded from the Inventory header (**+ Sale**); linked to
+  inventory and a customer; auto-reduces stock and computes COGS + profit
+  (price − fees − shipping − cost).
+- **Trades** — recorded from the Inventory header (**+ Trade**); swap items for
+  items (plus cash), with cost basis passing through to what you receive.
 - **Expenses** — categorized deductible business expenses.
 - **Customers (CRM)** — contacts with type/tags/notes, purchase history, and
   lifetime spend.
@@ -41,20 +48,23 @@ database.
   passwords. Two roles: **ADMIN** (everything, including the Team page) and
   **STAFF** (everything except team management).
 - **Break down sealed product** — open a case/box into smaller units (see below).
-- **Quick add** — log purchases, sales, trades, expenses, customers, and leads
-  from a popup form opened by a single button on each page (no permanent form
-  cluttering the list).
-- **Search & filter** — the Inventory, Sales, and Trades pages have a search box
-  and filters (status / graded / outcome / platform) driven by the URL, so views
-  are bookmarkable.
-- **CSV export** — one click on any list page downloads a spreadsheet.
+- **Quick add** — record activity from a popup opened by a single button:
+  purchases, sales, and trades from the Inventory header; expenses, customers,
+  and leads from their own pages.
+- **Search & filter** — the Inventory tabs and the History activity log have a
+  search box and filters (status / graded / activity type) driven by the URL, so
+  views are bookmarkable.
+- **CSV export** — one click downloads a spreadsheet (inventory from the
+  Inventory header; sales and purchases from the History tab; expenses /
+  customers / leads from their pages).
 
 ### Item lifecycle: Brazil → US → sold
 
 Inventory moves through three stages, each on its own tab under **Inventory**:
 
-1. **In Brazil** — log a purchase with location **Brazil** and the item lands
-   here. This is product you own but haven't imported yet.
+1. **In Brazil** — record a purchase with location **Brazil** (the **+ Purchase**
+   button) and the item lands here. This is product you own but haven't imported
+   yet.
 2. **Ship to US** — on the **In Brazil** tab, click **+ Ship to US** to open a
    popup. Check the items going in the pack, set a **ship quantity** for each
    (you can ship part of a stack — e.g. 250 of 500 boxes), enter the
@@ -62,13 +72,14 @@ Inventory moves through three stages, each on its own tab under **Inventory**:
    costs are *landed costs*: they're split across the shipped units (weighted by
    cost value) and folded into cost basis, so profit math stays correct when
    they sell. The shipped units move to the **In US** tab (a partial ship leaves
-   the remainder in Brazil) and a record is kept on the **Shipments** tab
-   (deleting a shipment moves its items back to Brazil and reverses the cost).
-3. **In US** — landed inventory, ready to sell. Record a **sale** (wholesale or
-   Whatnot) from the Sales page — only US items can be sold. For Whatnot, use
-   **Break down** to open a sealed item into singles/units first.
+   the remainder in Brazil) and the shipment is logged in **History** (deleting
+   it there moves its items back to Brazil and reverses the cost).
+3. **In US** — landed inventory, ready to sell. Use **+ Sale** to record a sale
+   (wholesale or Whatnot) — only US items can be sold. For Whatnot, use **Break
+   down** to open a sealed item into singles/units first.
 
-Sold and broken-down items move to **History**.
+Every purchase, sale, trade, shipment, and break down is logged in the
+**History** tab.
 
 ### Breaking down sealed product
 
