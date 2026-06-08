@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { intNum, num, optDate, optStr, str } from "@/lib/utils";
 import { childInternalSku, ensureInternalSku, nextInternalSku } from "@/lib/sku";
+import { writeAudit } from "@/lib/audit";
 
 export async function updateItem(formData: FormData) {
   await requireSession();
@@ -268,10 +269,92 @@ export async function shipToUS(formData: FormData) {
   redirect("/inventory?tab=us");
 }
 
+// Edit a shipment's costs/metadata. Changing the landed costs (shipping /
+// tariffs / fees) re-distributes them across the shipped items by the same
+// proportions used originally and adjusts each still-in-US item's cost basis.
+export async function updateShipment(formData: FormData) {
+  const session = await requireSession();
+  const id = str(formData.get("id"));
+  const before = await prisma.shipment.findUnique({
+    where: { id },
+    include: { items: true },
+  });
+  if (!before) throw new Error("Shipment not found.");
+
+  const shipping = Math.max(0, num(formData.get("shipping")));
+  const tariffs = Math.max(0, num(formData.get("tariffs")));
+  const fees = Math.max(0, num(formData.get("fees")));
+  const newLanded = shipping + tariffs + fees;
+  const oldLanded = before.shipping + before.tariffs + before.fees;
+  const legCount = before.items.length;
+
+  await prisma.$transaction(async (tx) => {
+    for (const leg of before.items) {
+      // Keep each leg's original share of the landed cost.
+      const share =
+        oldLanded > 0
+          ? leg.landedCost / oldLanded
+          : legCount > 0
+            ? 1 / legCount
+            : 0;
+      const newLegCost = newLanded * share;
+
+      if (leg.inventoryItemId) {
+        const item = await tx.inventoryItem.findUnique({
+          where: { id: leg.inventoryItemId },
+        });
+        if (
+          item &&
+          item.location === "US" &&
+          item.status !== "SOLD" &&
+          item.status !== "BROKEN_DOWN" &&
+          item.quantity > 0
+        ) {
+          const delta = (newLegCost - leg.landedCost) / item.quantity;
+          await tx.inventoryItem.update({
+            where: { id: item.id },
+            data: { costBasis: Math.max(0, item.costBasis + delta) },
+          });
+        }
+      }
+
+      await tx.shipmentItem.update({
+        where: { id: leg.id },
+        data: { landedCost: newLegCost },
+      });
+    }
+
+    await tx.shipment.update({
+      where: { id },
+      data: {
+        date: optDate(formData.get("date")) ?? before.date,
+        reference: optStr(formData.get("reference")),
+        shipping,
+        tariffs,
+        fees,
+        notes: optStr(formData.get("notes")),
+      },
+    });
+  });
+
+  const after = await prisma.shipment.findUnique({ where: { id } });
+  await writeAudit(prisma, {
+    entity: "Shipment",
+    entityId: id,
+    action: "update",
+    summary: before.reference || "Shipment",
+    before,
+    after,
+    userEmail: session.user?.email ?? null,
+  });
+
+  revalidatePath("/inventory");
+}
+
 // Delete a shipment and best-effort reverse it: move the items back to Brazil
 // and strip the landed cost back out of their cost basis.
 export async function deleteShipment(formData: FormData) {
-  await requireSession();
+  const session = await requireSession();
   const id = str(formData.get("id"));
 
   const shipment = await prisma.shipment.findUnique({
@@ -307,6 +390,15 @@ export async function deleteShipment(formData: FormData) {
       });
     }
     await tx.shipment.delete({ where: { id: shipment.id } });
+  });
+
+  await writeAudit(prisma, {
+    entity: "Shipment",
+    entityId: id,
+    action: "delete",
+    summary: shipment.reference || "Shipment",
+    before: shipment,
+    userEmail: session.user?.email ?? null,
   });
 
   revalidatePath("/inventory");
