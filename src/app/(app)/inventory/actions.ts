@@ -6,7 +6,7 @@ import { ItemStatus, InventoryLocation } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { intNum, num, optDate, optStr, str } from "@/lib/utils";
-import { childInternalSku, ensureInternalSku } from "@/lib/sku";
+import { childInternalSku, ensureInternalSku, nextInternalSku } from "@/lib/sku";
 
 export async function updateItem(formData: FormData) {
   await requireSession();
@@ -151,10 +151,13 @@ export async function breakDownItem(formData: FormData) {
   redirect("/inventory");
 }
 
-// Ship a batch of selected Brazil items to the US. The shipping + tariff + fee
-// costs are landed costs: they are spread across the shipped items (weighted by
-// each item's cost value) and folded into the item's cost basis, then the items
-// are moved to the US. A Shipment record snapshots what moved and what it cost.
+// Ship selected Brazil items (in whole or in part) to the US. For each selected
+// item a ship quantity is read from `qty_<id>` (defaulting to the full stock).
+// The shipping + tariff + fee costs are landed costs: spread across the shipped
+// units (weighted by cost value) and folded into their cost basis. Shipping the
+// full quantity flips the item to the US; shipping part of it leaves the
+// remainder in Brazil and creates a new US item for the shipped units. A
+// Shipment record snapshots what moved and what it cost.
 export async function shipToUS(formData: FormData) {
   await requireSession();
 
@@ -171,48 +174,91 @@ export async function shipToUS(formData: FormData) {
   const reference = optStr(formData.get("reference"));
   const notes = optStr(formData.get("notes"));
 
-  const items = await prisma.inventoryItem.findMany({
+  const dbItems = await prisma.inventoryItem.findMany({
     where: { id: { in: itemIds }, location: "BRAZIL" },
   });
-  if (items.length === 0) {
-    throw new Error("None of the selected items are currently in Brazil.");
+
+  // Resolve the ship quantity per item: default to the full stock, clamp to
+  // what's available, and drop anything that resolves to zero.
+  const lines = dbItems
+    .map((item) => {
+      const raw = intNum(formData.get(`qty_${item.id}`));
+      const qty = raw > 0 ? Math.min(raw, item.quantity) : item.quantity;
+      return { item, qty };
+    })
+    .filter((l) => l.qty > 0);
+
+  if (lines.length === 0) {
+    throw new Error("None of the selected items are available to ship.");
   }
 
-  // Distribute landed cost by cost value (ad-valorem style), falling back to
-  // an even per-unit split when there is no cost basis to weight against.
-  const totalValue = items.reduce((s, i) => s + i.quantity * i.costBasis, 0);
-  const totalUnits = items.reduce((s, i) => s + i.quantity, 0);
+  // Distribute landed cost by shipped cost value (ad-valorem style), falling
+  // back to an even per-unit split when there is no cost basis to weight against.
+  const totalValue = lines.reduce((s, l) => s + l.qty * l.item.costBasis, 0);
+  const totalUnits = lines.reduce((s, l) => s + l.qty, 0);
 
   await prisma.$transaction(async (tx) => {
     const shipment = await tx.shipment.create({
       data: { date, reference, shipping, tariffs, fees, notes },
     });
 
-    for (const item of items) {
+    for (const { item, qty } of lines) {
       const weight =
         totalValue > 0
-          ? (item.quantity * item.costBasis) / totalValue
+          ? (qty * item.costBasis) / totalValue
           : totalUnits > 0
-            ? item.quantity / totalUnits
+            ? qty / totalUnits
             : 0;
       const landed = landedTotal * weight;
-      const perUnit = item.quantity > 0 ? landed / item.quantity : 0;
+      const perUnit = qty > 0 ? landed / qty : 0;
+      const shippedBasis = item.costBasis + perUnit;
 
-      await tx.inventoryItem.update({
-        where: { id: item.id },
-        data: {
-          location: "US",
-          costBasis: item.costBasis + perUnit,
-        },
-      });
+      let shippedItemId = item.id;
+
+      if (qty >= item.quantity) {
+        // Whole line ships: flip it to the US.
+        await tx.inventoryItem.update({
+          where: { id: item.id },
+          data: { location: "US", costBasis: shippedBasis },
+        });
+      } else {
+        // Partial: leave the remainder in Brazil (unchanged basis) and create a
+        // new US item for the shipped units carrying the landed cost.
+        await tx.inventoryItem.update({
+          where: { id: item.id },
+          data: { quantity: item.quantity - qty },
+        });
+        const created = await tx.inventoryItem.create({
+          data: {
+            name: item.name,
+            setName: item.setName,
+            year: item.year,
+            cardNumber: item.cardNumber,
+            condition: item.condition,
+            graded: item.graded,
+            gradingCompany: item.gradingCompany,
+            grade: item.grade,
+            certNumber: item.certNumber,
+            quantity: qty,
+            costBasis: shippedBasis,
+            acquisitionDate: item.acquisitionDate,
+            status: "IN_STOCK",
+            location: "US",
+            sku: item.sku,
+            internalSku: await nextInternalSku(tx),
+            notes: item.notes,
+          },
+        });
+        shippedItemId = created.id;
+      }
 
       await tx.shipmentItem.create({
         data: {
           shipmentId: shipment.id,
           itemName: item.name,
-          quantity: item.quantity,
+          quantity: qty,
           landedCost: landed,
-          inventoryItemId: item.id,
+          inventoryItemId: shippedItemId,
         },
       });
     }
