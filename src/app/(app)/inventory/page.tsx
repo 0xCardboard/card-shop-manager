@@ -3,6 +3,7 @@ import { ItemStatus, Prisma } from "@prisma/client";
 import PageHeader from "@/components/PageHeader";
 import SubmitOnChange from "@/components/SubmitOnChange";
 import FilterBar from "@/components/FilterBar";
+import Modal, { ModalSubmit } from "@/components/Modal";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { fmtDate, money, toDateInput } from "@/lib/utils";
@@ -137,19 +138,26 @@ export default async function InventoryPage({
 }
 
 // ── In Brazil ───────────────────────────────────────────────────────────────
-// Items just purchased, sitting in Brazil. Select any number, enter the
-// shipping + tariff costs for the pack, and ship them to the US in one click.
+// Items just purchased, sitting in Brazil. Use "Ship to US" to move some or all
+// of them — picking a quantity per item — and record the shipment's costs.
 async function BrazilTab({ filters }: { filters: Filters }) {
   const { q, status, graded } = filters;
-  const items = await prisma.inventoryItem.findMany({
-    where: {
-      location: "BRAZIL",
-      status: status ? (status as ItemStatus) : { in: ACTIVE_STATUSES },
-      ...(graded ? { graded: graded === "yes" } : {}),
-      ...nameSearch(q),
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  const [items, shippable] = await Promise.all([
+    prisma.inventoryItem.findMany({
+      where: {
+        location: "BRAZIL",
+        status: status ? (status as ItemStatus) : { in: ACTIVE_STATUSES },
+        ...(graded ? { graded: graded === "yes" } : {}),
+        ...nameSearch(q),
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    // Everything shippable, regardless of the on-page filter, for the modal.
+    prisma.inventoryItem.findMany({
+      where: { location: "BRAZIL", status: { in: ACTIVE_STATUSES } },
+      orderBy: { name: "asc" },
+    }),
+  ]);
 
   const totalUnits = items.reduce((s, i) => s + i.quantity, 0);
   const totalValue = items.reduce((s, i) => s + i.quantity * i.costBasis, 0);
@@ -162,6 +170,105 @@ async function BrazilTab({ filters }: { filters: Filters }) {
         <Stat label="Total units" value={totalUnits.toString()} />
         <Stat label="Cost value" value={money(totalValue)} />
       </div>
+
+      {shippable.length > 0 && (
+        <div className="mb-4 flex justify-end">
+          <Modal triggerLabel="+ Ship to US" title="Ship items to the US">
+            <form action={shipToUS} className="space-y-4">
+              <p className="text-xs text-slate-500">
+                Choose how many of each item to ship. Shipping, tariffs and fees
+                are split across the shipped units (by cost value) and added to
+                their cost basis, so profit math stays accurate when they sell.
+              </p>
+
+              <div className="max-h-72 overflow-y-auto rounded-lg border border-slate-200">
+                <table className="w-full">
+                  <thead className="sticky top-0 border-b border-slate-200 bg-slate-50">
+                    <tr>
+                      <th className="th w-8"></th>
+                      <th className="th">Item</th>
+                      <th className="th">Available</th>
+                      <th className="th">Ship qty</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {shippable.map((i) => (
+                      <tr key={i.id}>
+                        <td className="td">
+                          <input
+                            type="checkbox"
+                            name="itemId"
+                            value={i.id}
+                            defaultChecked
+                            className="h-4 w-4"
+                          />
+                        </td>
+                        <td className="td">
+                          <div className="font-medium">{i.name}</div>
+                          <div className="text-xs text-slate-400">
+                            {[i.setName, i.year, i.internalSku]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </div>
+                        </td>
+                        <td className="td text-slate-500">{i.quantity}</td>
+                        <td className="td">
+                          <input
+                            type="number"
+                            name={`qty_${i.id}`}
+                            min={1}
+                            max={i.quantity}
+                            defaultValue={i.quantity}
+                            className="input w-24 py-1"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <div>
+                  <label className="label">Ship date</label>
+                  <input
+                    name="date"
+                    type="date"
+                    defaultValue={toDateInput(new Date())}
+                    className="input"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="label">Reference (optional)</label>
+                  <input
+                    name="reference"
+                    className="input"
+                    placeholder="Tracking # / pack name"
+                  />
+                </div>
+                <div>
+                  <label className="label">Shipping cost</label>
+                  <input name="shipping" type="number" step="0.01" defaultValue="0" className="input" />
+                </div>
+                <div>
+                  <label className="label">Tariffs / duties</label>
+                  <input name="tariffs" type="number" step="0.01" defaultValue="0" className="input" />
+                </div>
+                <div>
+                  <label className="label">Other fees</label>
+                  <input name="fees" type="number" step="0.01" defaultValue="0" className="input" />
+                </div>
+                <div className="col-span-2 sm:col-span-3">
+                  <label className="label">Notes</label>
+                  <input name="notes" className="input" />
+                </div>
+              </div>
+
+              <ModalSubmit>Ship selected to US</ModalSubmit>
+            </form>
+          </Modal>
+        </div>
+      )}
 
       <FilterBar
         action="/inventory"
@@ -190,116 +297,54 @@ async function BrazilTab({ filters }: { filters: Filters }) {
           )}
         </div>
       ) : (
-        <form action={shipToUS}>
-          <div className="card mb-4 overflow-x-auto">
-            <table className="w-full min-w-[760px]">
-              <thead className="border-b border-slate-200 bg-slate-50">
-                <tr>
-                  <th className="th w-10"></th>
-                  <th className="th">Card</th>
-                  <th className="th">Details</th>
-                  <th className="th">Internal SKU</th>
-                  <th className="th">Qty</th>
-                  <th className="th">Cost/unit</th>
-                  <th className="th">Value</th>
-                  <th className="th"></th>
+        <div className="card overflow-x-auto">
+          <table className="w-full min-w-[760px]">
+            <thead className="border-b border-slate-200 bg-slate-50">
+              <tr>
+                <th className="th">Card</th>
+                <th className="th">Details</th>
+                <th className="th">Internal SKU</th>
+                <th className="th">Qty</th>
+                <th className="th">Cost/unit</th>
+                <th className="th">Value</th>
+                <th className="th"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {items.map((i) => (
+                <tr key={i.id}>
+                  <td className="td font-medium">
+                    {i.name}
+                    {i.graded && (
+                      <span className="badge ml-2 bg-amber-100 text-amber-700">
+                        {i.gradingCompany || "Graded"} {i.grade}
+                      </span>
+                    )}
+                  </td>
+                  <td className="td text-slate-500">
+                    {[i.setName, i.year, i.cardNumber ? `#${i.cardNumber}` : null, i.condition]
+                      .filter(Boolean)
+                      .join(" · ") || "—"}
+                  </td>
+                  <td className="td font-mono text-xs text-slate-600">
+                    {i.internalSku || "—"}
+                  </td>
+                  <td className="td">{i.quantity}</td>
+                  <td className="td">{money(i.costBasis)}</td>
+                  <td className="td">{money(i.quantity * i.costBasis)}</td>
+                  <td className="td">
+                    <Link
+                      href={`/inventory/${i.id}/edit`}
+                      className="btn-secondary py-1 text-xs"
+                    >
+                      Edit
+                    </Link>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {items.map((i) => (
-                  <tr key={i.id}>
-                    <td className="td">
-                      <input
-                        type="checkbox"
-                        name="itemId"
-                        value={i.id}
-                        defaultChecked
-                        className="h-4 w-4"
-                      />
-                    </td>
-                    <td className="td font-medium">
-                      {i.name}
-                      {i.graded && (
-                        <span className="badge ml-2 bg-amber-100 text-amber-700">
-                          {i.gradingCompany || "Graded"} {i.grade}
-                        </span>
-                      )}
-                    </td>
-                    <td className="td text-slate-500">
-                      {[i.setName, i.year, i.cardNumber ? `#${i.cardNumber}` : null, i.condition]
-                        .filter(Boolean)
-                        .join(" · ") || "—"}
-                    </td>
-                    <td className="td font-mono text-xs text-slate-600">
-                      {i.internalSku || "—"}
-                    </td>
-                    <td className="td">{i.quantity}</td>
-                    <td className="td">{money(i.costBasis)}</td>
-                    <td className="td">{money(i.quantity * i.costBasis)}</td>
-                    <td className="td">
-                      <Link
-                        href={`/inventory/${i.id}/edit`}
-                        className="btn-secondary py-1 text-xs"
-                      >
-                        Edit
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="card p-5">
-            <p className="mb-4 text-sm font-semibold text-slate-700">
-              Ship checked items to the US
-            </p>
-            <p className="mb-4 text-xs text-slate-500">
-              Shipping, tariffs and fees are split across the shipped items (by
-              cost value) and added to their cost basis, so profit math stays
-              accurate when they sell.
-            </p>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <div>
-                <label className="label">Ship date</label>
-                <input
-                  name="date"
-                  type="date"
-                  defaultValue={toDateInput(new Date())}
-                  className="input"
-                />
-              </div>
-              <div>
-                <label className="label">Reference (optional)</label>
-                <input
-                  name="reference"
-                  className="input"
-                  placeholder="Tracking # / pack name"
-                />
-              </div>
-              <div className="hidden sm:block" />
-              <div>
-                <label className="label">Shipping cost</label>
-                <input name="shipping" type="number" step="0.01" defaultValue="0" className="input" />
-              </div>
-              <div>
-                <label className="label">Tariffs / duties</label>
-                <input name="tariffs" type="number" step="0.01" defaultValue="0" className="input" />
-              </div>
-              <div>
-                <label className="label">Other fees</label>
-                <input name="fees" type="number" step="0.01" defaultValue="0" className="input" />
-              </div>
-              <div className="col-span-2 sm:col-span-3">
-                <label className="label">Notes</label>
-                <input name="notes" className="input" />
-              </div>
-            </div>
-            <button className="btn-primary mt-4" type="submit">
-              Ship selected to US
-            </button>
-          </div>
-        </form>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

@@ -55,14 +55,15 @@ Inventory moves through three stages, each on its own tab under **Inventory**:
 
 1. **In Brazil** — log a purchase with location **Brazil** and the item lands
    here. This is product you own but haven't imported yet.
-2. **Ship to US** — on the **In Brazil** tab, check the items going in a pack,
-   enter the **shipping** and **tariff/duty** (and any other fees) for that
-   shipment, and click **Ship selected to US**. Those costs are *landed costs*:
-   they're split across the shipped items (weighted by cost value) and folded
-   into each item's cost basis, so profit math stays correct when they sell.
-   The items move to the **In US** tab and a record is kept on the **Shipments**
-   tab (deleting a shipment moves its items back to Brazil and reverses the
-   cost).
+2. **Ship to US** — on the **In Brazil** tab, click **+ Ship to US** to open a
+   popup. Check the items going in the pack, set a **ship quantity** for each
+   (you can ship part of a stack — e.g. 250 of 500 boxes), enter the
+   **shipping** and **tariff/duty** (and any other fees), and submit. Those
+   costs are *landed costs*: they're split across the shipped units (weighted by
+   cost value) and folded into cost basis, so profit math stays correct when
+   they sell. The shipped units move to the **In US** tab (a partial ship leaves
+   the remainder in Brazil) and a record is kept on the **Shipments** tab
+   (deleting a shipment moves its items back to Brazil and reverses the cost).
 3. **In US** — landed inventory, ready to sell. Record a **sale** (wholesale or
    Whatnot) from the Sales page — only US items can be sold. For Whatnot, use
    **Break down** to open a sealed item into singles/units first.
