@@ -146,8 +146,8 @@ export async function createTrade(formData: FormData) {
     }
   });
 
-  revalidatePath("/trades");
   revalidatePath("/inventory");
+  revalidatePath("/dashboard");
   redirect("/inventory?tab=history");
 }
 
@@ -194,6 +194,6 @@ export async function deleteTrade(formData: FormData) {
     await tx.trade.delete({ where: { id: trade.id } });
   });
 
-  revalidatePath("/trades");
   revalidatePath("/inventory");
+  revalidatePath("/dashboard");
 }
