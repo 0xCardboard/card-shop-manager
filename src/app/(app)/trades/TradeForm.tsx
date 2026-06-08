@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useFormStatus } from "react-dom";
+import { ModalSubmit } from "@/components/Modal";
 import { money, toDateInput } from "@/lib/utils";
 import { createTrade } from "./actions";
 
@@ -11,15 +11,6 @@ type RecvRow = { key: number; name: string; qty: number; value: number };
 
 let counter = 1;
 const nextKey = () => counter++;
-
-function SubmitButton() {
-  const { pending } = useFormStatus();
-  return (
-    <button className="btn-primary" type="submit" disabled={pending}>
-      {pending ? "Saving…" : "Log trade"}
-    </button>
-  );
-}
 
 export default function TradeForm({ items }: { items: Item[] }) {
   const [given, setGiven] = useState<GivenRow[]>([
@@ -65,7 +56,7 @@ export default function TradeForm({ items }: { items: Item[] }) {
   }, [given, received, cashOut, cashIn, itemById]);
 
   return (
-    <form action={createTrade} className="card space-y-6 p-5">
+    <form action={createTrade} className="space-y-6">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div>
           <label className="label">Date</label>
@@ -306,7 +297,7 @@ export default function TradeForm({ items }: { items: Item[] }) {
         </div>
       </div>
 
-      <SubmitButton />
+      <ModalSubmit>Log trade</ModalSubmit>
     </form>
   );
 }

@@ -1,4 +1,5 @@
 import PageHeader from "@/components/PageHeader";
+import Modal, { ModalSubmit } from "@/components/Modal";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { fmtDate, money, toDateInput } from "@/lib/utils";
@@ -23,6 +24,79 @@ export default async function PurchasesPage() {
         title="Purchases"
         subtitle="Log what you buy. Linked items update inventory and cost basis automatically."
       >
+        <Modal triggerLabel="+ Log purchase" title="Log a purchase">
+          <form
+            action={createPurchase}
+            className="grid grid-cols-2 gap-3"
+          >
+            <div>
+              <label className="label">Date</label>
+              <input
+                name="date"
+                type="date"
+                defaultValue={toDateInput(new Date())}
+                className="input"
+              />
+            </div>
+            <div>
+              <label className="label">Item name</label>
+              <input name="itemName" required className="input" />
+            </div>
+            <div>
+              <label className="label">Source</label>
+              <input name="source" className="input" placeholder="eBay, show…" />
+            </div>
+            <div>
+              <label className="label">Location</label>
+              <select name="location" className="input" defaultValue="BRAZIL">
+                <option value="BRAZIL">Brazil</option>
+                <option value="US">US</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Quantity</label>
+              <input name="quantity" type="number" defaultValue="1" className="input" />
+            </div>
+            <div>
+              <label className="label">Cost / unit</label>
+              <input name="unitCost" type="number" step="0.01" defaultValue="0" className="input" />
+            </div>
+            <div>
+              <label className="label">Fees</label>
+              <input name="fees" type="number" step="0.01" defaultValue="0" className="input" />
+            </div>
+            <div>
+              <label className="label">Shipping</label>
+              <input name="shipping" type="number" step="0.01" defaultValue="0" className="input" />
+            </div>
+            <div className="col-span-2">
+              <label className="label">
+                Link to existing inventory item (optional)
+              </label>
+              <select name="inventoryItemId" className="input">
+                <option value="">— none —</option>
+                {items.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.name} ({i.quantity} in stock)
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="col-span-2">
+              <label className="flex items-center gap-2 py-1 text-sm">
+                <input type="checkbox" name="addToInventory" defaultChecked />
+                If not linked, create a new inventory item
+              </label>
+            </div>
+            <div className="col-span-2">
+              <label className="label">Notes</label>
+              <input name="notes" className="input" />
+            </div>
+            <div className="col-span-2">
+              <ModalSubmit>Log purchase</ModalSubmit>
+            </div>
+          </form>
+        </Modal>
         <a href="/api/export/purchases" className="btn-secondary">
           Export CSV
         </a>
@@ -32,83 +106,6 @@ export default async function PurchasesPage() {
         <Stat label="Purchases logged" value={purchases.length.toString()} />
         <Stat label="Total spent (shown)" value={money(total)} />
       </div>
-
-      <details className="card mb-6 p-5" open>
-        <summary className="cursor-pointer text-sm font-semibold text-slate-700">
-          + Log a purchase
-        </summary>
-        <form
-          action={createPurchase}
-          className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4"
-        >
-          <div>
-            <label className="label">Date</label>
-            <input
-              name="date"
-              type="date"
-              defaultValue={toDateInput(new Date())}
-              className="input"
-            />
-          </div>
-          <div className="col-span-2 sm:col-span-1">
-            <label className="label">Item name</label>
-            <input name="itemName" required className="input" />
-          </div>
-          <div>
-            <label className="label">Source</label>
-            <input name="source" className="input" placeholder="eBay, show…" />
-          </div>
-          <div>
-            <label className="label">Location</label>
-            <select name="location" className="input" defaultValue="BRAZIL">
-              <option value="BRAZIL">Brazil</option>
-              <option value="US">US</option>
-            </select>
-          </div>
-          <div>
-            <label className="label">Quantity</label>
-            <input name="quantity" type="number" defaultValue="1" className="input" />
-          </div>
-          <div>
-            <label className="label">Cost / unit</label>
-            <input name="unitCost" type="number" step="0.01" defaultValue="0" className="input" />
-          </div>
-          <div>
-            <label className="label">Fees</label>
-            <input name="fees" type="number" step="0.01" defaultValue="0" className="input" />
-          </div>
-          <div>
-            <label className="label">Shipping</label>
-            <input name="shipping" type="number" step="0.01" defaultValue="0" className="input" />
-          </div>
-          <div className="col-span-2">
-            <label className="label">Link to existing inventory item (optional)</label>
-            <select name="inventoryItemId" className="input">
-              <option value="">— none —</option>
-              {items.map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.name} ({i.quantity} in stock)
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="col-span-2 flex items-end">
-            <label className="flex items-center gap-2 py-2 text-sm">
-              <input type="checkbox" name="addToInventory" defaultChecked />
-              If not linked, create a new inventory item
-            </label>
-          </div>
-          <div className="col-span-2 sm:col-span-4">
-            <label className="label">Notes</label>
-            <input name="notes" className="input" />
-          </div>
-          <div className="col-span-2 sm:col-span-4">
-            <button className="btn-primary" type="submit">
-              Log purchase
-            </button>
-          </div>
-        </form>
-      </details>
 
       <div className="card overflow-x-auto">
         <table className="w-full min-w-[760px]">

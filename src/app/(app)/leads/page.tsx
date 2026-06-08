@@ -1,8 +1,9 @@
 import PageHeader from "@/components/PageHeader";
 import SubmitOnChange from "@/components/SubmitOnChange";
+import Modal, { ModalSubmit } from "@/components/Modal";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { fmtDate, money, toDateInput } from "@/lib/utils";
+import { fmtDate, money } from "@/lib/utils";
 import { createLead, deleteLead, updateStage } from "./actions";
 
 const STAGES = [
@@ -44,6 +45,62 @@ export default async function LeadsPage() {
         title="Leads & deals"
         subtitle="Track prospects, what they want, and follow-ups."
       >
+        <Modal triggerLabel="+ Add lead" title="Add a lead">
+          <form action={createLead} className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className="label">Title</label>
+              <input name="title" required className="input" placeholder="Wants 1999 holo Charizard" />
+            </div>
+            <div>
+              <label className="label">Stage</label>
+              <select name="stage" className="input" defaultValue="PROSPECT">
+                {STAGES.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">Est. value</label>
+              <input name="value" type="number" step="0.01" defaultValue="0" className="input" />
+            </div>
+            <div>
+              <label className="label">Contact name</label>
+              <input name="contactName" className="input" />
+            </div>
+            <div>
+              <label className="label">Contact info</label>
+              <input name="contactInfo" className="input" placeholder="email / phone" />
+            </div>
+            <div className="col-span-2">
+              <label className="label">Existing customer (optional)</label>
+              <select name="customerId" className="input">
+                <option value="">— none —</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">Follow-up date</label>
+              <input name="followUpDate" type="date" className="input" />
+            </div>
+            <div>
+              <label className="label">Interested in</label>
+              <input name="interestedIn" className="input" />
+            </div>
+            <div className="col-span-2">
+              <label className="label">Notes</label>
+              <input name="notes" className="input" />
+            </div>
+            <div className="col-span-2">
+              <ModalSubmit>Add lead</ModalSubmit>
+            </div>
+          </form>
+        </Modal>
         <a href="/api/export/leads" className="btn-secondary">
           Export CSV
         </a>
@@ -54,71 +111,6 @@ export default async function LeadsPage() {
         <Stat label="Open pipeline value" value={money(openValue)} />
         <Stat label="Won value" value={money(wonValue)} />
       </div>
-
-      <details className="card mb-6 p-5">
-        <summary className="cursor-pointer text-sm font-semibold text-slate-700">
-          + Add a lead
-        </summary>
-        <form
-          action={createLead}
-          className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4"
-        >
-          <div className="col-span-2">
-            <label className="label">Title</label>
-            <input name="title" required className="input" placeholder="Wants 1999 holo Charizard" />
-          </div>
-          <div>
-            <label className="label">Stage</label>
-            <select name="stage" className="input" defaultValue="PROSPECT">
-              {STAGES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label">Est. value</label>
-            <input name="value" type="number" step="0.01" defaultValue="0" className="input" />
-          </div>
-          <div>
-            <label className="label">Contact name</label>
-            <input name="contactName" className="input" />
-          </div>
-          <div>
-            <label className="label">Contact info</label>
-            <input name="contactInfo" className="input" placeholder="email / phone" />
-          </div>
-          <div className="col-span-2">
-            <label className="label">Existing customer (optional)</label>
-            <select name="customerId" className="input">
-              <option value="">— none —</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label">Follow-up date</label>
-            <input name="followUpDate" type="date" className="input" />
-          </div>
-          <div className="col-span-2 sm:col-span-4">
-            <label className="label">Interested in</label>
-            <input name="interestedIn" className="input" />
-          </div>
-          <div className="col-span-2 sm:col-span-4">
-            <label className="label">Notes</label>
-            <input name="notes" className="input" />
-          </div>
-          <div className="col-span-2 sm:col-span-4">
-            <button className="btn-primary" type="submit">
-              Add lead
-            </button>
-          </div>
-        </form>
-      </details>
 
       <div className="card overflow-x-auto">
         <table className="w-full min-w-[780px]">
