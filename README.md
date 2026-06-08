@@ -22,10 +22,12 @@ database.
   Each item gets an auto-generated **internal SKU** (`CSM-000123`); broken-down
   units inherit a child SKU (`CSM-000123-B01`) that ties them back to the parent.
 - **History (activity log)** — every purchase, sale, trade, shipment, and break
-  down in one timeline, each tagged by type and filterable. Sales appear
-  per-sale as they happen, even while stock remains (sell 1 of 10 → a sale of 1
-  shows in History and 9 stay in stock). Records can be deleted here, which
-  reverses their inventory effect.
+  down in one timeline, each tagged by type, searchable and filterable by type.
+  Sales appear per-sale as they happen, even while stock remains (sell 1 of 10 →
+  a sale of 1 shows in History and 9 stay in stock). Records can be **edited** or
+  **deleted** here (which reverses their inventory effect). Every edit/delete is
+  written to an append-only **Change log** with before/after data and who made
+  it, so accidental or incorrect changes can be reviewed.
 - **Purchases** — recorded from the Inventory header (**+ Purchase**); choose the
   **location** (Brazil / US); optionally link to an existing item
   (auto-increments stock and recomputes weighted-average cost) or auto-create a
@@ -51,12 +53,12 @@ database.
 - **Quick add** — record activity from a popup opened by a single button:
   purchases, sales, and trades from the Inventory header; expenses, customers,
   and leads from their own pages.
-- **Search & filter** — the Inventory tabs and the History activity log have a
-  search box and filters (status / graded / activity type) driven by the URL, so
-  views are bookmarkable.
-- **CSV export** — one click downloads a spreadsheet (inventory from the
-  Inventory header; sales and purchases from the History tab; expenses /
-  customers / leads from their pages).
+- **Search & filter** — the History activity log has a search box and an
+  activity-type filter driven by the URL, so views are bookmarkable.
+- **CSV export** — one click downloads a spreadsheet. The History tab's
+  **Export** button respects the current filter (export all activity, or just
+  shipments, or just sales, etc.); inventory exports from the Inventory header;
+  expenses / customers / leads from their pages.
 
 ### Item lifecycle: Brazil → US → sold
 

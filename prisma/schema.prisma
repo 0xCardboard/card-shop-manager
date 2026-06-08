@@ -232,3 +232,19 @@ model TradeLeg {
   @@index([tradeId])
   @@index([inventoryItemId])
 }
+
+// Append-only audit trail for edits and deletes of activity records, so any
+// incorrect or accidental change can be reviewed with before/after data.
+model AuditLog {
+  id        String   @id @default(cuid())
+  entity    String   // Purchase | Sale | Trade | Shipment
+  entityId  String
+  action    String   // update | delete
+  summary   String?  // human label, e.g. the item or counterparty name
+  before    String?  // JSON snapshot before the change
+  after     String?  // JSON snapshot after the change (null for deletes)
+  userEmail String?  // who made the change
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}

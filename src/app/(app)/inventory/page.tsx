@@ -1,46 +1,22 @@
 import Link from "next/link";
-import { ItemStatus, Prisma } from "@prisma/client";
+import { ItemStatus } from "@prisma/client";
 import PageHeader from "@/components/PageHeader";
 import SubmitOnChange from "@/components/SubmitOnChange";
 import FilterBar from "@/components/FilterBar";
 import Modal, { ModalSubmit } from "@/components/Modal";
 import RecordButtons from "./RecordButtons";
+import { EditPurchase, EditSale, EditTrade, EditShipment } from "./EditModals";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { fetchHistoryRaw } from "@/lib/history";
 import { fmtDate, money, toDateInput } from "@/lib/utils";
 import { deleteItem, deleteShipment, shipToUS, updateStatus } from "./actions";
 import { deletePurchase } from "@/app/(app)/purchases/actions";
 import { deleteSale } from "@/app/(app)/sales/actions";
 import { deleteTrade } from "@/app/(app)/trades/actions";
 
-type Filters = { q: string; status: string; graded: string; type: string };
+type Filters = { q: string; type: string };
 
-// Search across the descriptive/identifier fields shared by every item.
-function nameSearch(q: string): Prisma.InventoryItemWhereInput {
-  if (!q) return {};
-  const contains = { contains: q, mode: "insensitive" as const };
-  return {
-    OR: [
-      { name: contains },
-      { setName: contains },
-      { cardNumber: contains },
-      { sku: contains },
-      { internalSku: contains },
-    ],
-  };
-}
-
-const STATUS_FILTER_OPTS = [
-  { value: "", label: "All statuses" },
-  { value: "IN_STOCK", label: "In stock" },
-  { value: "LISTED", label: "Listed" },
-  { value: "RESERVED", label: "Reserved" },
-];
-const GRADED_FILTER_OPTS = [
-  { value: "", label: "Graded & raw" },
-  { value: "yes", label: "Graded only" },
-  { value: "no", label: "Raw only" },
-];
 const TYPE_FILTER_OPTS = [
   { value: "", label: "All activity" },
   { value: "purchase", label: "Purchases" },
@@ -70,27 +46,18 @@ type Tab = "brazil" | "us" | "history";
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams: {
-    tab?: string;
-    q?: string;
-    status?: string;
-    graded?: string;
-    type?: string;
-  };
+  searchParams: { tab?: string; q?: string; type?: string };
 }) {
   await requireSession();
   const raw = searchParams?.tab;
   const tab: Tab = raw === "brazil" || raw === "history" ? raw : "us";
-  // Sanitize filter params against their allowed values so a stale/hand-edited
-  // URL can't push an invalid enum into Prisma (which would throw a 500).
-  const oneOf = (v: string | undefined, allowed: string[]) =>
-    v && allowed.includes(v) ? v : "";
-  const filters: Filters = {
-    q: (searchParams.q ?? "").trim(),
-    status: oneOf(searchParams.status, ["IN_STOCK", "LISTED", "RESERVED"]),
-    graded: oneOf(searchParams.graded, ["yes", "no"]),
-    type: oneOf(searchParams.type, HISTORY_TYPES),
-  };
+  // Sanitize the activity-type param so a stale/hand-edited URL can't push an
+  // invalid value into the History query.
+  const validType =
+    searchParams.type && HISTORY_TYPES.includes(searchParams.type)
+      ? searchParams.type
+      : "";
+  const filters: Filters = { q: (searchParams.q ?? "").trim(), type: validType };
 
   const [brazilCount, usCount, purchaseItems, saleItems, tradeItems, customers] =
     await Promise.all([
@@ -151,9 +118,9 @@ export default async function InventoryPage({
         </TabLink>
       </div>
 
-      {tab === "brazil" && <BrazilTab filters={filters} />}
-      {tab === "us" && <UsTab filters={filters} />}
-      {tab === "history" && <HistoryTab filters={filters} />}
+      {tab === "brazil" && <BrazilTab />}
+      {tab === "us" && <UsTab />}
+      {tab === "history" && <HistoryTab filters={filters} customers={customers} />}
     </div>
   );
 }
@@ -161,28 +128,15 @@ export default async function InventoryPage({
 // ── In Brazil ───────────────────────────────────────────────────────────────
 // Items just purchased, sitting in Brazil. Use "Ship to US" to move some or all
 // of them — picking a quantity per item — and record the shipment's costs.
-async function BrazilTab({ filters }: { filters: Filters }) {
-  const { q, status, graded } = filters;
-  const [items, shippable] = await Promise.all([
-    prisma.inventoryItem.findMany({
-      where: {
-        location: "BRAZIL",
-        status: status ? (status as ItemStatus) : { in: ACTIVE_STATUSES },
-        ...(graded ? { graded: graded === "yes" } : {}),
-        ...nameSearch(q),
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-    // Everything shippable, regardless of the on-page filter, for the modal.
-    prisma.inventoryItem.findMany({
-      where: { location: "BRAZIL", status: { in: ACTIVE_STATUSES } },
-      orderBy: { name: "asc" },
-    }),
-  ]);
+async function BrazilTab() {
+  const items = await prisma.inventoryItem.findMany({
+    where: { location: "BRAZIL", status: { in: ACTIVE_STATUSES } },
+    orderBy: { createdAt: "desc" },
+  });
+  const shippable = items;
 
   const totalUnits = items.reduce((s, i) => s + i.quantity, 0);
   const totalValue = items.reduce((s, i) => s + i.quantity * i.costBasis, 0);
-  const filtered = Boolean(q || status || graded);
 
   return (
     <div>
@@ -291,28 +245,10 @@ async function BrazilTab({ filters }: { filters: Filters }) {
         </div>
       )}
 
-      <FilterBar
-        action="/inventory"
-        q={q}
-        placeholder="Search name, set, SKU…"
-        hidden={{ tab: "brazil" }}
-        selects={[
-          { name: "status", value: status, options: STATUS_FILTER_OPTS },
-          { name: "graded", value: graded, options: GRADED_FILTER_OPTS },
-        ]}
-        clearHref="/inventory?tab=brazil"
-      />
-
       {items.length === 0 ? (
         <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
-          {filtered ? (
-            "No items in Brazil match your filters."
-          ) : (
-            <>
-              No inventory in Brazil. Items appear here when you record a
-              purchase (button above) with location set to Brazil.
-            </>
-          )}
+          No inventory in Brazil. Items appear here when you record a purchase
+          (button above) with location set to Brazil.
         </div>
       ) : (
         <div className="card overflow-x-auto">
@@ -370,15 +306,9 @@ async function BrazilTab({ filters }: { filters: Filters }) {
 
 // ── In US ───────────────────────────────────────────────────────────────────
 // Landed inventory, ready to sell (wholesale) or break down (for Whatnot).
-async function UsTab({ filters }: { filters: Filters }) {
-  const { q, status, graded } = filters;
+async function UsTab() {
   const items = await prisma.inventoryItem.findMany({
-    where: {
-      location: "US",
-      status: status ? (status as ItemStatus) : { in: ACTIVE_STATUSES },
-      ...(graded ? { graded: graded === "yes" } : {}),
-      ...nameSearch(q),
-    },
+    where: { location: "US", status: { in: ACTIVE_STATUSES } },
     orderBy: { createdAt: "desc" },
     include: { parentItem: { select: { internalSku: true, name: true } } },
   });
@@ -386,7 +316,6 @@ async function UsTab({ filters }: { filters: Filters }) {
   const totalUnits = items.reduce((s, i) => s + i.quantity, 0);
   const totalValue = items.reduce((s, i) => s + i.quantity * i.costBasis, 0);
   const lowStock = items.filter((i) => i.quantity <= 1).length;
-  const filtered = Boolean(q || status || graded);
 
   return (
     <div>
@@ -396,18 +325,6 @@ async function UsTab({ filters }: { filters: Filters }) {
         <Stat label="Inventory value (cost)" value={money(totalValue)} />
         <Stat label="Low stock (≤1)" value={lowStock.toString()} />
       </div>
-
-      <FilterBar
-        action="/inventory"
-        q={q}
-        placeholder="Search name, set, SKU…"
-        hidden={{ tab: "us" }}
-        selects={[
-          { name: "status", value: status, options: STATUS_FILTER_OPTS },
-          { name: "graded", value: graded, options: GRADED_FILTER_OPTS },
-        ]}
-        clearHref="/inventory?tab=us"
-      />
 
       <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
         Landed US inventory. Use <strong>+ Sale</strong> above to record a sale
@@ -439,9 +356,7 @@ async function UsTab({ filters }: { filters: Filters }) {
             {items.length === 0 && (
               <tr>
                 <td className="td text-slate-400" colSpan={9}>
-                  {filtered
-                    ? "No US inventory matches your filters."
-                    : "No US inventory yet. Ship items from Brazil to land them here."}
+                  No US inventory yet. Ship items from Brazil to land them here.
                 </td>
               </tr>
             )}
@@ -526,96 +441,19 @@ const TAGS: Record<string, { label: string; cls: string }> = {
   breakdown: { label: "Break down", cls: "bg-amber-100 text-amber-700" },
 };
 
-async function HistoryTab({ filters }: { filters: Filters }) {
+async function HistoryTab({
+  filters,
+  customers,
+}: {
+  filters: Filters;
+  customers: { id: string; name: string }[];
+}) {
   const { q, type } = filters;
-  const want = (t: string) => !type || type === t;
-  const TAKE = 200;
-  const contains = q
-    ? { contains: q, mode: "insensitive" as const }
-    : undefined;
-
-  const [purchases, sales, trades, shipments, broken] = await Promise.all([
-    want("purchase")
-      ? prisma.purchase.findMany({
-          where: contains
-            ? {
-                OR: [
-                  { itemName: contains },
-                  { source: contains },
-                  { notes: contains },
-                ],
-              }
-            : {},
-          orderBy: { date: "desc" },
-          take: TAKE,
-          include: { inventoryItem: { select: { internalSku: true } } },
-        })
-      : [],
-    want("sale")
-      ? prisma.sale.findMany({
-          where: contains
-            ? {
-                OR: [
-                  { platform: contains },
-                  { notes: contains },
-                  { inventoryItem: { name: contains } },
-                  { customer: { name: contains } },
-                ],
-              }
-            : {},
-          orderBy: { date: "desc" },
-          take: TAKE,
-          include: {
-            inventoryItem: { select: { name: true, internalSku: true } },
-            customer: { select: { name: true } },
-          },
-        })
-      : [],
-    want("trade")
-      ? prisma.trade.findMany({
-          where: contains
-            ? {
-                OR: [
-                  { counterparty: contains },
-                  { notes: contains },
-                  { legs: { some: { itemName: contains } } },
-                ],
-              }
-            : {},
-          orderBy: { date: "desc" },
-          take: TAKE,
-          include: { legs: true },
-        })
-      : [],
-    want("shipment")
-      ? prisma.shipment.findMany({
-          where: contains
-            ? {
-                OR: [
-                  { reference: contains },
-                  { notes: contains },
-                  { items: { some: { itemName: contains } } },
-                ],
-              }
-            : {},
-          orderBy: { date: "desc" },
-          take: TAKE,
-          include: { items: true },
-        })
-      : [],
-    want("breakdown")
-      ? prisma.inventoryItem.findMany({
-          where: { status: "BROKEN_DOWN", ...nameSearch(q) },
-          orderBy: [{ brokenDownAt: "desc" }, { updatedAt: "desc" }],
-          take: TAKE,
-          include: {
-            childItems: {
-              select: { id: true, name: true, internalSku: true, quantity: true },
-            },
-          },
-        })
-      : [],
+  const [raw, audits] = await Promise.all([
+    fetchHistoryRaw({ q, type }),
+    prisma.auditLog.findMany({ orderBy: { createdAt: "desc" }, take: 100 }),
   ]);
+  const { purchases, sales, trades, shipments, broken } = raw;
 
   type Ev = {
     key: string;
@@ -624,7 +462,7 @@ async function HistoryTab({ filters }: { filters: Filters }) {
     name: string;
     sku: string | null;
     details: React.ReactNode;
-    del?: React.ReactNode;
+    actions: React.ReactNode;
   };
   const events: Ev[] = [];
 
@@ -642,7 +480,12 @@ async function HistoryTab({ filters }: { filters: Filters }) {
           {p.source ? ` · ${p.source}` : ""}
         </span>
       ),
-      del: <DeleteForm action={deletePurchase} id={p.id} />,
+      actions: (
+        <RowActions>
+          <EditPurchase purchase={p} />
+          <DeleteForm action={deletePurchase} id={p.id} />
+        </RowActions>
+      ),
     });
   }
   for (const s of sales) {
@@ -668,7 +511,12 @@ async function HistoryTab({ filters }: { filters: Filters }) {
           )}
         </div>
       ),
-      del: <DeleteForm action={deleteSale} id={s.id} />,
+      actions: (
+        <RowActions>
+          <EditSale sale={s} customers={customers} />
+          <DeleteForm action={deleteSale} id={s.id} />
+        </RowActions>
+      ),
     });
   }
   for (const t of trades) {
@@ -699,7 +547,12 @@ async function HistoryTab({ filters }: { filters: Filters }) {
           )}
         </div>
       ),
-      del: <DeleteForm action={deleteTrade} id={t.id} />,
+      actions: (
+        <RowActions>
+          <EditTrade trade={t} />
+          <DeleteForm action={deleteTrade} id={t.id} />
+        </RowActions>
+      ),
     });
   }
   for (const sh of shipments) {
@@ -720,7 +573,12 @@ async function HistoryTab({ filters }: { filters: Filters }) {
           </span>
         </span>
       ),
-      del: <DeleteForm action={deleteShipment} id={sh.id} />,
+      actions: (
+        <RowActions>
+          <EditShipment shipment={sh} />
+          <DeleteForm action={deleteShipment} id={sh.id} />
+        </RowActions>
+      ),
     });
   }
   for (const b of broken) {
@@ -731,6 +589,7 @@ async function HistoryTab({ filters }: { filters: Filters }) {
       name: b.name,
       sku: b.internalSku,
       details: <BrokenDetails units={b.childItems} />,
+      actions: null,
     });
   }
 
@@ -739,6 +598,9 @@ async function HistoryTab({ filters }: { filters: Filters }) {
   const unitsSold = sales.reduce((s, x) => s + x.quantity, 0);
   const realizedProfit = sales.reduce((s, x) => s + x.profit, 0);
   const filtered = Boolean(q || type);
+  const exportHref = `/api/export/history?type=${encodeURIComponent(
+    type
+  )}&q=${encodeURIComponent(q)}`;
 
   return (
     <div>
@@ -758,11 +620,9 @@ async function HistoryTab({ filters }: { filters: Filters }) {
           clearHref="/inventory?tab=history"
         />
         <div className="flex gap-2">
-          <a href="/api/export/sales" className="btn-secondary py-1 text-xs">
-            Export sales
-          </a>
-          <a href="/api/export/purchases" className="btn-secondary py-1 text-xs">
-            Export purchases
+          <ChangeLog audits={audits} />
+          <a href={exportHref} className="btn-secondary">
+            Export
           </a>
         </div>
       </div>
@@ -805,13 +665,125 @@ async function HistoryTab({ filters }: { filters: Filters }) {
                   )}
                 </td>
                 <td className="td text-slate-600">{e.details}</td>
-                <td className="td">{e.del}</td>
+                <td className="td">{e.actions}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
     </div>
+  );
+}
+
+function RowActions({ children }: { children: React.ReactNode }) {
+  return <div className="flex gap-2">{children}</div>;
+}
+
+// Read-only change log: every edit/delete with who, when, and before→after.
+function ChangeLog({
+  audits,
+}: {
+  audits: {
+    id: string;
+    entity: string;
+    action: string;
+    summary: string | null;
+    before: string | null;
+    after: string | null;
+    userEmail: string | null;
+    createdAt: Date;
+  }[];
+}) {
+  return (
+    <Modal triggerLabel="Change log" triggerClassName="btn-secondary" title="Change log">
+      {audits.length === 0 ? (
+        <p className="text-sm text-slate-500">
+          No edits or deletions recorded yet. Any change made here is logged with
+          before/after data.
+        </p>
+      ) : (
+        <ul className="max-h-[70vh] space-y-3 overflow-y-auto">
+          {audits.map((a) => (
+            <li key={a.id} className="rounded-lg border border-slate-200 p-3">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span
+                  className={`badge ${
+                    a.action === "delete"
+                      ? "bg-red-100 text-red-700"
+                      : "bg-amber-100 text-amber-700"
+                  }`}
+                >
+                  {a.action}
+                </span>
+                <span className="font-medium">
+                  {a.entity}
+                  {a.summary ? ` · ${a.summary}` : ""}
+                </span>
+                <span className="text-xs text-slate-400">
+                  {fmtDate(a.createdAt)}
+                  {a.userEmail ? ` · ${a.userEmail}` : ""}
+                </span>
+              </div>
+              <AuditDiff before={a.before} after={a.after} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </Modal>
+  );
+}
+
+// Render the changed fields of an audit entry as "field: before → after".
+function AuditDiff({
+  before,
+  after,
+}: {
+  before: string | null;
+  after: string | null;
+}) {
+  const parse = (s: string | null): Record<string, unknown> => {
+    if (!s) return {};
+    try {
+      return JSON.parse(s) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  };
+  const b = parse(before);
+  const a = parse(after);
+  const skip = new Set(["id", "createdAt", "updatedAt"]);
+  const fmt = (v: unknown) =>
+    v === null || v === undefined || v === "" ? "—" : String(v);
+
+  if (!after) {
+    // A deletion — show a short snapshot of what was removed.
+    const keys = Object.keys(b).filter((k) => !skip.has(k));
+    return (
+      <div className="mt-1 text-xs text-slate-500">
+        Deleted record.{" "}
+        {keys
+          .slice(0, 6)
+          .map((k) => `${k}: ${fmt(b[k])}`)
+          .join(" · ")}
+      </div>
+    );
+  }
+
+  const keys = Array.from(new Set([...Object.keys(b), ...Object.keys(a)])).filter(
+    (k) => !skip.has(k) && fmt(b[k]) !== fmt(a[k])
+  );
+  if (keys.length === 0) {
+    return <div className="mt-1 text-xs text-slate-400">No field changes.</div>;
+  }
+  return (
+    <ul className="mt-1 space-y-0.5 text-xs text-slate-500">
+      {keys.map((k) => (
+        <li key={k}>
+          <span className="text-slate-400">{k}:</span> {fmt(b[k])}{" "}
+          <span className="text-slate-400">→</span> {fmt(a[k])}
+        </li>
+      ))}
+    </ul>
   );
 }
 

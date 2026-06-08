@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isoDate, toCsv } from "@/lib/csv";
+import { fetchHistoryRaw, historyToCsv } from "@/lib/history";
 
 export const dynamic = "force-dynamic";
 
@@ -11,10 +12,11 @@ type ExportType =
   | "sales"
   | "expenses"
   | "customers"
-  | "leads";
+  | "leads"
+  | "history";
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: { type: string } }
 ) {
   const session = await auth();
@@ -25,6 +27,29 @@ export async function GET(
   const type = params.type as ExportType;
   let headers: string[] = [];
   let rows: unknown[][] = [];
+
+  // The History export mirrors the on-screen filter (activity type + search).
+  if (type === "history") {
+    const url = new URL(req.url);
+    const raw = await fetchHistoryRaw(
+      {
+        q: (url.searchParams.get("q") ?? "").trim(),
+        type: url.searchParams.get("type") ?? "",
+      },
+      5000
+    );
+    const csv = historyToCsv(raw);
+    headers = csv.headers;
+    rows = csv.rows;
+    const out = toCsv(headers, rows);
+    const fname = `history-${isoDate(new Date())}.csv`;
+    return new NextResponse(out, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${fname}"`,
+      },
+    });
+  }
 
   switch (type) {
     case "inventory": {

@@ -6,6 +6,7 @@ import { requireSession } from "@/lib/session";
 import { InventoryLocation } from "@prisma/client";
 import { intNum, num, optDate, optStr, str } from "@/lib/utils";
 import { nextInternalSku } from "@/lib/sku";
+import { writeAudit } from "@/lib/audit";
 
 export async function createPurchase(formData: FormData) {
   await requireSession();
@@ -72,11 +73,51 @@ export async function createPurchase(formData: FormData) {
   revalidatePath("/inventory");
 }
 
+// Edit the label/cost-of-acquisition fields of a purchase. Quantity and
+// per-unit cost are NOT editable here because they were baked into the linked
+// item's weighted-average cost basis; to change those, delete and re-add.
+export async function updatePurchase(formData: FormData) {
+  const session = await requireSession();
+  const id = str(formData.get("id"));
+  const before = await prisma.purchase.findUnique({ where: { id } });
+  if (!before) throw new Error("Purchase not found.");
+
+  const fees = num(formData.get("fees"));
+  const shipping = num(formData.get("shipping"));
+  const total = before.quantity * before.unitCost + fees + shipping;
+
+  const after = await prisma.purchase.update({
+    where: { id },
+    data: {
+      date: optDate(formData.get("date")) ?? before.date,
+      source: optStr(formData.get("source")),
+      itemName: str(formData.get("itemName")) || before.itemName,
+      fees,
+      shipping,
+      total,
+      notes: optStr(formData.get("notes")),
+    },
+  });
+
+  await writeAudit(prisma, {
+    entity: "Purchase",
+    entityId: id,
+    action: "update",
+    summary: after.itemName,
+    before,
+    after,
+    userEmail: session.user?.email ?? null,
+  });
+
+  revalidatePath("/inventory");
+}
+
 export async function deletePurchase(formData: FormData) {
-  await requireSession();
+  const session = await requireSession();
   const id = str(formData.get("id"));
   const purchase = await prisma.purchase.findUnique({ where: { id } });
-  if (purchase?.inventoryItemId) {
+  if (!purchase) return;
+  if (purchase.inventoryItemId) {
     const item = await prisma.inventoryItem.findUnique({
       where: { id: purchase.inventoryItemId },
     });
@@ -88,6 +129,13 @@ export async function deletePurchase(formData: FormData) {
     }
   }
   await prisma.purchase.delete({ where: { id } });
-  revalidatePath("/purchases");
+  await writeAudit(prisma, {
+    entity: "Purchase",
+    entityId: id,
+    action: "delete",
+    summary: purchase.itemName,
+    before: purchase,
+    userEmail: session.user?.email ?? null,
+  });
   revalidatePath("/inventory");
 }

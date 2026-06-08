@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { intNum, num, optDate, optStr, str } from "@/lib/utils";
 import { nextInternalSku } from "@/lib/sku";
+import { writeAudit } from "@/lib/audit";
 
 // Log a trade: items (and optionally cash) given are swapped for items (and
 // optionally cash) received. The cost basis of the items given is pooled,
@@ -151,11 +152,42 @@ export async function createTrade(formData: FormData) {
   redirect("/inventory?tab=history");
 }
 
+// Edit a trade's label fields (date, counterparty, notes). The traded items and
+// cash define the cost-basis pass-through, so to change those, delete and
+// re-add the trade.
+export async function updateTrade(formData: FormData) {
+  const session = await requireSession();
+  const id = str(formData.get("id"));
+  const before = await prisma.trade.findUnique({ where: { id } });
+  if (!before) throw new Error("Trade not found.");
+
+  const after = await prisma.trade.update({
+    where: { id },
+    data: {
+      date: optDate(formData.get("date")) ?? before.date,
+      counterparty: optStr(formData.get("counterparty")),
+      notes: optStr(formData.get("notes")),
+    },
+  });
+
+  await writeAudit(prisma, {
+    entity: "Trade",
+    entityId: id,
+    action: "update",
+    summary: after.counterparty || "Trade",
+    before,
+    after,
+    userEmail: session.user?.email ?? null,
+  });
+
+  revalidatePath("/inventory");
+}
+
 // Delete a trade and best-effort reverse its inventory effects: restore the
 // quantities given (folding their basis back in) and remove the quantities
 // received.
 export async function deleteTrade(formData: FormData) {
-  await requireSession();
+  const session = await requireSession();
   const id = str(formData.get("id"));
 
   const trade = await prisma.trade.findUnique({
@@ -192,6 +224,15 @@ export async function deleteTrade(formData: FormData) {
       }
     }
     await tx.trade.delete({ where: { id: trade.id } });
+  });
+
+  await writeAudit(prisma, {
+    entity: "Trade",
+    entityId: id,
+    action: "delete",
+    summary: trade.counterparty || "Trade",
+    before: trade,
+    userEmail: session.user?.email ?? null,
   });
 
   revalidatePath("/inventory");
