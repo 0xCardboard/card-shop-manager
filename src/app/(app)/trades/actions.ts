@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { intNum, num, optDate, optStr, str } from "@/lib/utils";
+import { nextInternalSku } from "@/lib/sku";
 
 // Log a trade: items (and optionally cash) given are swapped for items (and
 // optionally cash) received. The cost basis of the items given is pooled,
@@ -126,6 +127,7 @@ export async function createTrade(formData: FormData) {
           costBasis: r.qty > 0 ? legBasis / r.qty : 0,
           acquisitionDate: date,
           status: "IN_STOCK",
+          internalSku: await nextInternalSku(tx),
           notes: counterparty
             ? `Acquired via trade with ${counterparty}`
             : "Acquired via trade",

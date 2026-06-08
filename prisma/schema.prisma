@@ -17,6 +17,7 @@ enum ItemStatus {
   LISTED
   SOLD
   RESERVED
+  BROKEN_DOWN
 }
 
 enum LeadStage {
@@ -54,13 +55,23 @@ model InventoryItem {
   acquisitionDate DateTime?
   status          ItemStatus @default(IN_STOCK)
   sku             String?
+  internalSku     String?    @unique // auto-generated internal SKU, ties breakdown lineage together
   notes           String?
+  brokenDownAt    DateTime?  // set when the item is fully broken down into child units
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
+
+  // Self-relation: a parent (e.g. a sealed case) broken down into child units
+  // (e.g. booster boxes). Children point back at the parent they came from.
+  parentItem   InventoryItem?  @relation("Breakdown", fields: [parentItemId], references: [id], onDelete: SetNull)
+  parentItemId String?
+  childItems   InventoryItem[] @relation("Breakdown")
 
   purchases Purchase[]
   sales     Sale[]
   tradeLegs TradeLeg[]
+
+  @@index([parentItemId])
 }
 
 model Purchase {

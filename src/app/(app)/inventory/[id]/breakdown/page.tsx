@@ -18,7 +18,10 @@ export default async function BreakdownPage({
   if (!parent) notFound();
 
   const others = await prisma.inventoryItem.findMany({
-    where: { id: { not: parent.id } },
+    where: {
+      id: { not: parent.id },
+      status: { in: ["IN_STOCK", "LISTED", "RESERVED"] },
+    },
     orderBy: { name: "asc" },
   });
 

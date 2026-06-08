@@ -6,6 +6,7 @@ import { ItemStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { intNum, num, optDate, optStr, str } from "@/lib/utils";
+import { childInternalSku, ensureInternalSku } from "@/lib/sku";
 
 export async function updateItem(formData: FormData) {
   await requireSession();
@@ -78,10 +79,22 @@ export async function breakDownItem(formData: FormData) {
   const childUnitCost = childQty > 0 ? totalCost / childQty : 0;
 
   await prisma.$transaction(async (tx) => {
-    // Consume parent units.
+    const remainingParentQty = parent.quantity - parentQty;
+
+    // Ensure the parent has an internal SKU so children can reference it.
+    const parentSku = await ensureInternalSku(tx, parent);
+
+    // Consume parent units. If the parent is now fully broken down, move it to
+    // history with a BROKEN_DOWN status instead of leaving a 0-qty "in stock"
+    // ghost in the inventory list.
     await tx.inventoryItem.update({
       where: { id: parent.id },
-      data: { quantity: parent.quantity - parentQty },
+      data: {
+        quantity: remainingParentQty,
+        ...(remainingParentQty === 0
+          ? { status: "BROKEN_DOWN", brokenDownAt: new Date() }
+          : {}),
+      },
     });
 
     if (targetId) {
@@ -98,10 +111,21 @@ export async function breakDownItem(formData: FormData) {
           : childUnitCost;
       await tx.inventoryItem.update({
         where: { id: target.id },
-        data: { quantity: newQty, costBasis: newCost, status: "IN_STOCK" },
+        data: {
+          quantity: newQty,
+          costBasis: newCost,
+          status: "IN_STOCK",
+          // Record the lineage if this item isn't already tied to a parent.
+          ...(target.parentItemId ? {} : { parentItemId: parent.id }),
+        },
       });
     } else {
-      // Create a new child item, inheriting some descriptive fields.
+      // Create a new child item, inheriting some descriptive fields. Its
+      // internal SKU is derived from the parent's so the lineage is visible
+      // at a glance (e.g. CSM-000123 → CSM-000123-B01).
+      const childCount = await tx.inventoryItem.count({
+        where: { parentItemId: parent.id },
+      });
       await tx.inventoryItem.create({
         data: {
           name: childName,
@@ -112,7 +136,9 @@ export async function breakDownItem(formData: FormData) {
           costBasis: childUnitCost,
           acquisitionDate: parent.acquisitionDate,
           status: "IN_STOCK",
-          notes: `Broken down from "${parent.name}"`,
+          internalSku: childInternalSku(parentSku, childCount + 1),
+          parentItemId: parent.id,
+          notes: `Broken down from "${parent.name}" (${parentSku})`,
         },
       });
     }

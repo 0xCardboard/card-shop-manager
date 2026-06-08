@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { intNum, num, optDate, optStr, str } from "@/lib/utils";
+import { nextInternalSku } from "@/lib/sku";
 
 export async function createPurchase(formData: FormData) {
   await requireSession();
@@ -42,6 +43,7 @@ export async function createPurchase(formData: FormData) {
         costBasis: unitCost,
         acquisitionDate: date,
         status: "IN_STOCK",
+        internalSku: await nextInternalSku(prisma),
       },
     });
     inventoryItemId = created.id;
