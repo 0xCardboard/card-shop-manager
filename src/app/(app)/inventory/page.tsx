@@ -4,8 +4,8 @@ import PageHeader from "@/components/PageHeader";
 import SubmitOnChange from "@/components/SubmitOnChange";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { fmtDate, money } from "@/lib/utils";
-import { deleteItem, updateStatus } from "./actions";
+import { fmtDate, money, toDateInput } from "@/lib/utils";
+import { deleteItem, deleteShipment, shipToUS, updateStatus } from "./actions";
 
 // Statuses an item can be set to manually. SOLD and BROKEN_DOWN are outcomes of
 // recording a sale or breaking an item down — they land it in the History tab.
@@ -25,51 +25,215 @@ const HISTORY_STATUSES: ItemStatus[] = [
   ItemStatus.BROKEN_DOWN,
 ];
 
+type Tab = "brazil" | "us" | "shipments" | "history";
+
 export default async function InventoryPage({
   searchParams,
 }: {
   searchParams: { tab?: string };
 }) {
   await requireSession();
-  const tab = searchParams?.tab === "history" ? "history" : "active";
+  const raw = searchParams?.tab;
+  const tab: Tab =
+    raw === "brazil" || raw === "shipments" || raw === "history" ? raw : "us";
 
-  const [activeCount, historyCount] = await Promise.all([
-    prisma.inventoryItem.count({
-      where: { status: { in: ACTIVE_STATUSES } },
-    }),
-    prisma.inventoryItem.count({
-      where: { status: { in: HISTORY_STATUSES } },
-    }),
-  ]);
+  const [brazilCount, usCount, shipmentsCount, historyCount] =
+    await Promise.all([
+      prisma.inventoryItem.count({
+        where: { status: { in: ACTIVE_STATUSES }, location: "BRAZIL" },
+      }),
+      prisma.inventoryItem.count({
+        where: { status: { in: ACTIVE_STATUSES }, location: "US" },
+      }),
+      prisma.shipment.count(),
+      prisma.inventoryItem.count({
+        where: { status: { in: HISTORY_STATUSES } },
+      }),
+    ]);
 
   return (
     <div>
       <PageHeader
         title="Inventory"
-        subtitle="Every card, single or graded, with cost basis and stock status."
+        subtitle="Track every card through its lifecycle: Brazil → ship to US → sold."
       >
         <a href="/api/export/inventory" className="btn-secondary">
           Export CSV
         </a>
       </PageHeader>
 
-      <div className="mb-6 flex gap-2 border-b border-slate-200">
-        <Tab href="/inventory" active={tab === "active"}>
-          In stock <Count n={activeCount} />
-        </Tab>
-        <Tab href="/inventory?tab=history" active={tab === "history"}>
+      <div className="mb-6 flex flex-wrap gap-2 border-b border-slate-200">
+        <TabLink href="/inventory?tab=brazil" active={tab === "brazil"}>
+          In Brazil <Count n={brazilCount} />
+        </TabLink>
+        <TabLink href="/inventory?tab=us" active={tab === "us"}>
+          In US <Count n={usCount} />
+        </TabLink>
+        <TabLink href="/inventory?tab=shipments" active={tab === "shipments"}>
+          Shipments <Count n={shipmentsCount} />
+        </TabLink>
+        <TabLink href="/inventory?tab=history" active={tab === "history"}>
           History <Count n={historyCount} />
-        </Tab>
+        </TabLink>
       </div>
 
-      {tab === "history" ? <HistoryTab /> : <ActiveTab />}
+      {tab === "brazil" && <BrazilTab />}
+      {tab === "us" && <UsTab />}
+      {tab === "shipments" && <ShipmentsTab />}
+      {tab === "history" && <HistoryTab />}
     </div>
   );
 }
 
-async function ActiveTab() {
+// ── In Brazil ───────────────────────────────────────────────────────────────
+// Items just purchased, sitting in Brazil. Select any number, enter the
+// shipping + tariff costs for the pack, and ship them to the US in one click.
+async function BrazilTab() {
   const items = await prisma.inventoryItem.findMany({
-    where: { status: { in: ACTIVE_STATUSES } },
+    where: { status: { in: ACTIVE_STATUSES }, location: "BRAZIL" },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const totalUnits = items.reduce((s, i) => s + i.quantity, 0);
+  const totalValue = items.reduce((s, i) => s + i.quantity * i.costBasis, 0);
+
+  return (
+    <div>
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <Stat label="Items in Brazil" value={items.length.toString()} />
+        <Stat label="Total units" value={totalUnits.toString()} />
+        <Stat label="Cost value" value={money(totalValue)} />
+      </div>
+
+      {items.length === 0 ? (
+        <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
+          No inventory in Brazil. Items appear here when you{" "}
+          <a href="/purchases" className="font-medium text-brand-700">
+            log a purchase
+          </a>{" "}
+          with location set to Brazil.
+        </div>
+      ) : (
+        <form action={shipToUS}>
+          <div className="card mb-4 overflow-x-auto">
+            <table className="w-full min-w-[760px]">
+              <thead className="border-b border-slate-200 bg-slate-50">
+                <tr>
+                  <th className="th w-10"></th>
+                  <th className="th">Card</th>
+                  <th className="th">Details</th>
+                  <th className="th">Internal SKU</th>
+                  <th className="th">Qty</th>
+                  <th className="th">Cost/unit</th>
+                  <th className="th">Value</th>
+                  <th className="th"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {items.map((i) => (
+                  <tr key={i.id}>
+                    <td className="td">
+                      <input
+                        type="checkbox"
+                        name="itemId"
+                        value={i.id}
+                        defaultChecked
+                        className="h-4 w-4"
+                      />
+                    </td>
+                    <td className="td font-medium">
+                      {i.name}
+                      {i.graded && (
+                        <span className="badge ml-2 bg-amber-100 text-amber-700">
+                          {i.gradingCompany || "Graded"} {i.grade}
+                        </span>
+                      )}
+                    </td>
+                    <td className="td text-slate-500">
+                      {[i.setName, i.year, i.cardNumber ? `#${i.cardNumber}` : null, i.condition]
+                        .filter(Boolean)
+                        .join(" · ") || "—"}
+                    </td>
+                    <td className="td font-mono text-xs text-slate-600">
+                      {i.internalSku || "—"}
+                    </td>
+                    <td className="td">{i.quantity}</td>
+                    <td className="td">{money(i.costBasis)}</td>
+                    <td className="td">{money(i.quantity * i.costBasis)}</td>
+                    <td className="td">
+                      <Link
+                        href={`/inventory/${i.id}/edit`}
+                        className="btn-secondary py-1 text-xs"
+                      >
+                        Edit
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="card p-5">
+            <p className="mb-4 text-sm font-semibold text-slate-700">
+              Ship checked items to the US
+            </p>
+            <p className="mb-4 text-xs text-slate-500">
+              Shipping, tariffs and fees are split across the shipped items (by
+              cost value) and added to their cost basis, so profit math stays
+              accurate when they sell.
+            </p>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div>
+                <label className="label">Ship date</label>
+                <input
+                  name="date"
+                  type="date"
+                  defaultValue={toDateInput(new Date())}
+                  className="input"
+                />
+              </div>
+              <div>
+                <label className="label">Reference (optional)</label>
+                <input
+                  name="reference"
+                  className="input"
+                  placeholder="Tracking # / pack name"
+                />
+              </div>
+              <div className="hidden sm:block" />
+              <div>
+                <label className="label">Shipping cost</label>
+                <input name="shipping" type="number" step="0.01" defaultValue="0" className="input" />
+              </div>
+              <div>
+                <label className="label">Tariffs / duties</label>
+                <input name="tariffs" type="number" step="0.01" defaultValue="0" className="input" />
+              </div>
+              <div>
+                <label className="label">Other fees</label>
+                <input name="fees" type="number" step="0.01" defaultValue="0" className="input" />
+              </div>
+              <div className="col-span-2 sm:col-span-3">
+                <label className="label">Notes</label>
+                <input name="notes" className="input" />
+              </div>
+            </div>
+            <button className="btn-primary mt-4" type="submit">
+              Ship selected to US
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+// ── In US ───────────────────────────────────────────────────────────────────
+// Landed inventory, ready to sell (wholesale) or break down (for Whatnot).
+async function UsTab() {
+  const items = await prisma.inventoryItem.findMany({
+    where: { status: { in: ACTIVE_STATUSES }, location: "US" },
     orderBy: { createdAt: "desc" },
     include: { parentItem: { select: { internalSku: true, name: true } } },
   });
@@ -88,23 +252,20 @@ async function ActiveTab() {
       </div>
 
       <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
-        Inventory is created automatically when you{" "}
-        <a href="/purchases" className="font-medium text-brand-700">
-          log a purchase
-        </a>
-        , break an item down, or receive items in a{" "}
-        <a href="/trades" className="font-medium text-brand-700">
-          trade
-        </a>
-        . Sold and broken-down items move to the{" "}
+        Landed US inventory. Record a{" "}
+        <a href="/sales" className="font-medium text-brand-700">
+          sale
+        </a>{" "}
+        (wholesale or Whatnot), or <strong>break down</strong> a sealed item
+        into singles for Whatnot. Sold and broken-down items move to{" "}
         <Link href="/inventory?tab=history" className="font-medium text-brand-700">
           History
-        </Link>{" "}
-        tab.
+        </Link>
+        .
       </div>
 
       <div className="card overflow-x-auto">
-        <table className="w-full min-w-[900px]">
+        <table className="w-full min-w-[940px]">
           <thead className="border-b border-slate-200 bg-slate-50">
             <tr>
               <th className="th">Card</th>
@@ -122,7 +283,7 @@ async function ActiveTab() {
             {items.length === 0 && (
               <tr>
                 <td className="td text-slate-400" colSpan={9}>
-                  No items in stock. Log a purchase to add inventory.
+                  No US inventory yet. Ship items from Brazil to land them here.
                 </td>
               </tr>
             )}
@@ -194,6 +355,90 @@ async function ActiveTab() {
   );
 }
 
+// ── Shipments ───────────────────────────────────────────────────────────────
+async function ShipmentsTab() {
+  const shipments = await prisma.shipment.findMany({
+    orderBy: { date: "desc" },
+    include: { items: true },
+  });
+
+  const totalLanded = shipments.reduce(
+    (s, x) => s + x.shipping + x.tariffs + x.fees,
+    0
+  );
+
+  return (
+    <div>
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <Stat label="Shipments" value={shipments.length.toString()} />
+        <Stat label="Total landed cost" value={money(totalLanded)} />
+      </div>
+
+      <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
+        Each shipment moved a batch of items from Brazil to the US. The landed
+        cost (shipping + tariffs + fees) was folded into those items&apos; cost
+        basis. Deleting a shipment moves its items back to Brazil and reverses
+        the cost.
+      </div>
+
+      <div className="card overflow-x-auto">
+        <table className="w-full min-w-[820px]">
+          <thead className="border-b border-slate-200 bg-slate-50">
+            <tr>
+              <th className="th">Date</th>
+              <th className="th">Reference</th>
+              <th className="th">Items</th>
+              <th className="th">Shipping</th>
+              <th className="th">Tariffs</th>
+              <th className="th">Fees</th>
+              <th className="th">Landed total</th>
+              <th className="th"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {shipments.length === 0 && (
+              <tr>
+                <td className="td text-slate-400" colSpan={8}>
+                  No shipments yet. Ship items from the In Brazil tab.
+                </td>
+              </tr>
+            )}
+            {shipments.map((s) => (
+              <tr key={s.id}>
+                <td className="td">{fmtDate(s.date)}</td>
+                <td className="td">{s.reference || "—"}</td>
+                <td className="td text-slate-600">
+                  <div className="text-sm">
+                    {s.items.reduce((a, x) => a + x.quantity, 0)} units ·{" "}
+                    {s.items.length} {s.items.length === 1 ? "item" : "items"}
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    {s.items.map((x) => x.itemName).slice(0, 4).join(", ")}
+                    {s.items.length > 4 ? "…" : ""}
+                  </div>
+                </td>
+                <td className="td">{money(s.shipping)}</td>
+                <td className="td">{money(s.tariffs)}</td>
+                <td className="td">{money(s.fees)}</td>
+                <td className="td font-medium">
+                  {money(s.shipping + s.tariffs + s.fees)}
+                </td>
+                <td className="td">
+                  <form action={deleteShipment}>
+                    <input type="hidden" name="id" value={s.id} />
+                    <button className="btn-danger py-1 text-xs">Delete</button>
+                  </form>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── History ─────────────────────────────────────────────────────────────────
 async function HistoryTab() {
   const items = await prisma.inventoryItem.findMany({
     where: { status: { in: HISTORY_STATUSES } },
@@ -375,7 +620,7 @@ function BrokenDetails({
   );
 }
 
-function Tab({
+function TabLink({
   href,
   active,
   children,

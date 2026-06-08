@@ -33,13 +33,13 @@ export async function GET(
       });
       headers = [
         "Name", "Set", "Year", "Card #", "Condition", "Graded",
-        "Grader", "Grade", "Cert #", "SKU", "Internal SKU", "Quantity",
-        "Cost/unit", "Total cost", "Status", "Acquired", "Notes",
+        "Grader", "Grade", "Cert #", "SKU", "Internal SKU", "Location",
+        "Quantity", "Cost/unit", "Total cost", "Status", "Acquired", "Notes",
       ];
       rows = items.map((i) => [
         i.name, i.setName, i.year, i.cardNumber, i.condition,
         i.graded ? "Yes" : "No", i.gradingCompany, i.grade, i.certNumber,
-        i.sku, i.internalSku, i.quantity, i.costBasis.toFixed(2),
+        i.sku, i.internalSku, i.location, i.quantity, i.costBasis.toFixed(2),
         (i.quantity * i.costBasis).toFixed(2), i.status,
         isoDate(i.acquisitionDate), i.notes,
       ]);

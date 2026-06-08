@@ -20,6 +20,12 @@ enum ItemStatus {
   BROKEN_DOWN
 }
 
+// Where an item physically sits in the purchase → ship → sell lifecycle.
+enum InventoryLocation {
+  BRAZIL
+  US
+}
+
 enum LeadStage {
   PROSPECT
   CONTACTED
@@ -53,7 +59,8 @@ model InventoryItem {
   quantity        Int        @default(0)
   costBasis       Float      @default(0) // average per-unit cost
   acquisitionDate DateTime?
-  status          ItemStatus @default(IN_STOCK)
+  status          ItemStatus        @default(IN_STOCK)
+  location        InventoryLocation @default(US) // where the item currently sits
   sku             String?
   internalSku     String?    @unique // auto-generated internal SKU, ties breakdown lineage together
   notes           String?
@@ -67,11 +74,49 @@ model InventoryItem {
   parentItemId String?
   childItems   InventoryItem[] @relation("Breakdown")
 
-  purchases Purchase[]
-  sales     Sale[]
-  tradeLegs TradeLeg[]
+  purchases    Purchase[]
+  sales        Sale[]
+  tradeLegs    TradeLeg[]
+  shipmentLegs ShipmentItem[]
 
   @@index([parentItemId])
+  @@index([location])
+}
+
+// A shipment moves a batch of items from Brazil to the US. The shipping +
+// tariff/duty + fee costs are "landed costs": they are distributed across the
+// shipped items (weighted by cost value) and folded into each item's cost
+// basis, so COGS and profit stay accurate when the items eventually sell.
+model Shipment {
+  id        String   @id @default(cuid())
+  date      DateTime @default(now())
+  reference String?  // tracking #, pack name, etc.
+  shipping  Float    @default(0)
+  tariffs   Float    @default(0) // duties / import tariffs
+  fees      Float    @default(0) // other import/customs fees
+  notes     String?
+  createdAt DateTime @default(now())
+
+  items ShipmentItem[]
+}
+
+// One item included in a shipment, snapshotting what was moved and the landed
+// cost allocated to it (so the shipment record is stable even if the item is
+// later sold or broken down).
+model ShipmentItem {
+  id         String @id @default(cuid())
+  itemName   String
+  quantity   Int    @default(1)
+  landedCost Float  @default(0) // shipping/tariff/fees allocated to this item
+
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  shipmentId String
+
+  inventoryItem   InventoryItem? @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+  inventoryItemId String?
+
+  @@index([shipmentId])
+  @@index([inventoryItemId])
 }
 
 model Purchase {

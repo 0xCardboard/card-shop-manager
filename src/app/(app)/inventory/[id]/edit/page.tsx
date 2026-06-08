@@ -74,6 +74,13 @@ export default async function EditInventoryPage({
             ))}
           </select>
         </div>
+        <div>
+          <label className="label">Location</label>
+          <select name="location" className="input" defaultValue={item.location}>
+            <option value="BRAZIL">Brazil</option>
+            <option value="US">US</option>
+          </select>
+        </div>
         <F label="Notes" name="notes" defaultValue={item.notes} full />
         <div className="col-span-2 sm:col-span-4">
           <button className="btn-primary" type="submit">

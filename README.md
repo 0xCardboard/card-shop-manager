@@ -16,12 +16,16 @@ database.
   revenue chart, top customers, and open follow-ups.
 - **Inventory** — trading-card fields (set, year, card #, condition, grading
   company / grade / cert #, SKU), quantity, cost basis, status. Add / edit /
-  delete, quick status changes, value rollups. Two tabs: **In stock** (active
-  items) and **History** (everything sold or broken down). Each item gets an
-  auto-generated **internal SKU** (`CSM-000123`); broken-down units inherit a
-  child SKU (`CSM-000123-B01`) that ties them back to the parent they came from.
-- **Purchases** — log buys; optionally link to an existing item (auto-increments
-  stock and recomputes weighted-average cost) or auto-create a new item.
+  delete, quick status changes, value rollups. Organized into lifecycle tabs:
+  **In Brazil**, **In US**, **Shipments**, and **History** (sold / broken
+  down). Each item gets an auto-generated **internal SKU** (`CSM-000123`);
+  broken-down units inherit a child SKU (`CSM-000123-B01`) that ties them back
+  to the parent they came from.
+- **Lifecycle / shipments** — track items from purchase in Brazil → shipment to
+  the US (with shipping + tariff/duty costs) → sale (see below).
+- **Purchases** — log buys; choose the **location** (Brazil / US); optionally
+  link to an existing item (auto-increments stock and recomputes
+  weighted-average cost) or auto-create a new item.
 - **Sales** — record sales linked to inventory and a customer; auto-reduces
   stock and computes COGS + profit (price − fees − shipping − cost).
 - **Expenses** — categorized deductible business expenses.
@@ -38,6 +42,26 @@ database.
   **STAFF** (everything except team management).
 - **Break down sealed product** — open a case/box into smaller units (see below).
 - **CSV export** — one click on any list page downloads a spreadsheet.
+
+### Item lifecycle: Brazil → US → sold
+
+Inventory moves through three stages, each on its own tab under **Inventory**:
+
+1. **In Brazil** — log a purchase with location **Brazil** and the item lands
+   here. This is product you own but haven't imported yet.
+2. **Ship to US** — on the **In Brazil** tab, check the items going in a pack,
+   enter the **shipping** and **tariff/duty** (and any other fees) for that
+   shipment, and click **Ship selected to US**. Those costs are *landed costs*:
+   they're split across the shipped items (weighted by cost value) and folded
+   into each item's cost basis, so profit math stays correct when they sell.
+   The items move to the **In US** tab and a record is kept on the **Shipments**
+   tab (deleting a shipment moves its items back to Brazil and reverses the
+   cost).
+3. **In US** — landed inventory, ready to sell. Record a **sale** (wholesale or
+   Whatnot) from the Sales page — only US items can be sold. For Whatnot, use
+   **Break down** to open a sealed item into singles/units first.
+
+Sold and broken-down items move to **History**.
 
 ### Breaking down sealed product
 

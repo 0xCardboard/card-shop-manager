@@ -59,6 +59,13 @@ export default async function PurchasesPage() {
             <input name="source" className="input" placeholder="eBay, show…" />
           </div>
           <div>
+            <label className="label">Location</label>
+            <select name="location" className="input" defaultValue="BRAZIL">
+              <option value="BRAZIL">Brazil</option>
+              <option value="US">US</option>
+            </select>
+          </div>
+          <div>
             <label className="label">Quantity</label>
             <input name="quantity" type="number" defaultValue="1" className="input" />
           </div>
