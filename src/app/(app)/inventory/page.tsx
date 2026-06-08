@@ -1,11 +1,46 @@
 import Link from "next/link";
-import { ItemStatus } from "@prisma/client";
+import { ItemStatus, Prisma } from "@prisma/client";
 import PageHeader from "@/components/PageHeader";
 import SubmitOnChange from "@/components/SubmitOnChange";
+import FilterBar from "@/components/FilterBar";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { fmtDate, money, toDateInput } from "@/lib/utils";
 import { deleteItem, deleteShipment, shipToUS, updateStatus } from "./actions";
+
+type Filters = { q: string; status: string; graded: string; outcome: string };
+
+// Search across the descriptive/identifier fields shared by every item.
+function nameSearch(q: string): Prisma.InventoryItemWhereInput {
+  if (!q) return {};
+  const contains = { contains: q, mode: "insensitive" as const };
+  return {
+    OR: [
+      { name: contains },
+      { setName: contains },
+      { cardNumber: contains },
+      { sku: contains },
+      { internalSku: contains },
+    ],
+  };
+}
+
+const STATUS_FILTER_OPTS = [
+  { value: "", label: "All statuses" },
+  { value: "IN_STOCK", label: "In stock" },
+  { value: "LISTED", label: "Listed" },
+  { value: "RESERVED", label: "Reserved" },
+];
+const GRADED_FILTER_OPTS = [
+  { value: "", label: "Graded & raw" },
+  { value: "yes", label: "Graded only" },
+  { value: "no", label: "Raw only" },
+];
+const OUTCOME_FILTER_OPTS = [
+  { value: "", label: "Sold & broken down" },
+  { value: "SOLD", label: "Sold" },
+  { value: "BROKEN_DOWN", label: "Broken down" },
+];
 
 // Statuses an item can be set to manually. SOLD and BROKEN_DOWN are outcomes of
 // recording a sale or breaking an item down — they land it in the History tab.
@@ -30,12 +65,28 @@ type Tab = "brazil" | "us" | "shipments" | "history";
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams: { tab?: string };
+  searchParams: {
+    tab?: string;
+    q?: string;
+    status?: string;
+    graded?: string;
+    outcome?: string;
+  };
 }) {
   await requireSession();
   const raw = searchParams?.tab;
   const tab: Tab =
     raw === "brazil" || raw === "shipments" || raw === "history" ? raw : "us";
+  // Sanitize filter params against their allowed values so a stale/hand-edited
+  // URL can't push an invalid enum into Prisma (which would throw a 500).
+  const oneOf = (v: string | undefined, allowed: string[]) =>
+    v && allowed.includes(v) ? v : "";
+  const filters: Filters = {
+    q: (searchParams.q ?? "").trim(),
+    status: oneOf(searchParams.status, ["IN_STOCK", "LISTED", "RESERVED"]),
+    graded: oneOf(searchParams.graded, ["yes", "no"]),
+    outcome: oneOf(searchParams.outcome, ["SOLD", "BROKEN_DOWN"]),
+  };
 
   const [brazilCount, usCount, shipmentsCount, historyCount] =
     await Promise.all([
@@ -77,10 +128,10 @@ export default async function InventoryPage({
         </TabLink>
       </div>
 
-      {tab === "brazil" && <BrazilTab />}
-      {tab === "us" && <UsTab />}
+      {tab === "brazil" && <BrazilTab filters={filters} />}
+      {tab === "us" && <UsTab filters={filters} />}
       {tab === "shipments" && <ShipmentsTab />}
-      {tab === "history" && <HistoryTab />}
+      {tab === "history" && <HistoryTab filters={filters} />}
     </div>
   );
 }
@@ -88,14 +139,21 @@ export default async function InventoryPage({
 // ── In Brazil ───────────────────────────────────────────────────────────────
 // Items just purchased, sitting in Brazil. Select any number, enter the
 // shipping + tariff costs for the pack, and ship them to the US in one click.
-async function BrazilTab() {
+async function BrazilTab({ filters }: { filters: Filters }) {
+  const { q, status, graded } = filters;
   const items = await prisma.inventoryItem.findMany({
-    where: { status: { in: ACTIVE_STATUSES }, location: "BRAZIL" },
+    where: {
+      location: "BRAZIL",
+      status: status ? (status as ItemStatus) : { in: ACTIVE_STATUSES },
+      ...(graded ? { graded: graded === "yes" } : {}),
+      ...nameSearch(q),
+    },
     orderBy: { createdAt: "desc" },
   });
 
   const totalUnits = items.reduce((s, i) => s + i.quantity, 0);
   const totalValue = items.reduce((s, i) => s + i.quantity * i.costBasis, 0);
+  const filtered = Boolean(q || status || graded);
 
   return (
     <div>
@@ -105,13 +163,31 @@ async function BrazilTab() {
         <Stat label="Cost value" value={money(totalValue)} />
       </div>
 
+      <FilterBar
+        action="/inventory"
+        q={q}
+        placeholder="Search name, set, SKU…"
+        hidden={{ tab: "brazil" }}
+        selects={[
+          { name: "status", value: status, options: STATUS_FILTER_OPTS },
+          { name: "graded", value: graded, options: GRADED_FILTER_OPTS },
+        ]}
+        clearHref="/inventory?tab=brazil"
+      />
+
       {items.length === 0 ? (
         <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
-          No inventory in Brazil. Items appear here when you{" "}
-          <a href="/purchases" className="font-medium text-brand-700">
-            log a purchase
-          </a>{" "}
-          with location set to Brazil.
+          {filtered ? (
+            "No items in Brazil match your filters."
+          ) : (
+            <>
+              No inventory in Brazil. Items appear here when you{" "}
+              <a href="/purchases" className="font-medium text-brand-700">
+                log a purchase
+              </a>{" "}
+              with location set to Brazil.
+            </>
+          )}
         </div>
       ) : (
         <form action={shipToUS}>
@@ -231,9 +307,15 @@ async function BrazilTab() {
 
 // ── In US ───────────────────────────────────────────────────────────────────
 // Landed inventory, ready to sell (wholesale) or break down (for Whatnot).
-async function UsTab() {
+async function UsTab({ filters }: { filters: Filters }) {
+  const { q, status, graded } = filters;
   const items = await prisma.inventoryItem.findMany({
-    where: { status: { in: ACTIVE_STATUSES }, location: "US" },
+    where: {
+      location: "US",
+      status: status ? (status as ItemStatus) : { in: ACTIVE_STATUSES },
+      ...(graded ? { graded: graded === "yes" } : {}),
+      ...nameSearch(q),
+    },
     orderBy: { createdAt: "desc" },
     include: { parentItem: { select: { internalSku: true, name: true } } },
   });
@@ -241,6 +323,7 @@ async function UsTab() {
   const totalUnits = items.reduce((s, i) => s + i.quantity, 0);
   const totalValue = items.reduce((s, i) => s + i.quantity * i.costBasis, 0);
   const lowStock = items.filter((i) => i.quantity <= 1).length;
+  const filtered = Boolean(q || status || graded);
 
   return (
     <div>
@@ -250,6 +333,18 @@ async function UsTab() {
         <Stat label="Inventory value (cost)" value={money(totalValue)} />
         <Stat label="Low stock (≤1)" value={lowStock.toString()} />
       </div>
+
+      <FilterBar
+        action="/inventory"
+        q={q}
+        placeholder="Search name, set, SKU…"
+        hidden={{ tab: "us" }}
+        selects={[
+          { name: "status", value: status, options: STATUS_FILTER_OPTS },
+          { name: "graded", value: graded, options: GRADED_FILTER_OPTS },
+        ]}
+        clearHref="/inventory?tab=us"
+      />
 
       <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
         Landed US inventory. Record a{" "}
@@ -283,7 +378,9 @@ async function UsTab() {
             {items.length === 0 && (
               <tr>
                 <td className="td text-slate-400" colSpan={9}>
-                  No US inventory yet. Ship items from Brazil to land them here.
+                  {filtered
+                    ? "No US inventory matches your filters."
+                    : "No US inventory yet. Ship items from Brazil to land them here."}
                 </td>
               </tr>
             )}
@@ -439,9 +536,13 @@ async function ShipmentsTab() {
 }
 
 // ── History ─────────────────────────────────────────────────────────────────
-async function HistoryTab() {
+async function HistoryTab({ filters }: { filters: Filters }) {
+  const { q, outcome } = filters;
   const items = await prisma.inventoryItem.findMany({
-    where: { status: { in: HISTORY_STATUSES } },
+    where: {
+      status: outcome ? (outcome as ItemStatus) : { in: HISTORY_STATUSES },
+      ...nameSearch(q),
+    },
     orderBy: [{ brokenDownAt: "desc" }, { updatedAt: "desc" }],
     include: {
       sales: { include: { customer: true }, orderBy: { date: "desc" } },
@@ -457,6 +558,7 @@ async function HistoryTab() {
     (s, i) => s + i.sales.reduce((a, x) => a + x.profit, 0),
     0
   );
+  const filtered = Boolean(q || outcome);
 
   return (
     <div>
@@ -465,6 +567,17 @@ async function HistoryTab() {
         <Stat label="Broken down" value={brokenItems.length.toString()} />
         <Stat label="Realized profit" value={money(realizedProfit)} />
       </div>
+
+      <FilterBar
+        action="/inventory"
+        q={q}
+        placeholder="Search name, set, SKU…"
+        hidden={{ tab: "history" }}
+        selects={[
+          { name: "outcome", value: outcome, options: OUTCOME_FILTER_OPTS },
+        ]}
+        clearHref="/inventory?tab=history"
+      />
 
       <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
         Items that have left active stock. Sold items show the sale details;
@@ -487,8 +600,9 @@ async function HistoryTab() {
             {items.length === 0 && (
               <tr>
                 <td className="td text-slate-400" colSpan={5}>
-                  Nothing here yet. Sold and broken-down items will appear in
-                  this history.
+                  {filtered
+                    ? "No history items match your filters."
+                    : "Nothing here yet. Sold and broken-down items will appear in this history."}
                 </td>
               </tr>
             )}

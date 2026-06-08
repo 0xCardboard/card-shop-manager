@@ -1,4 +1,5 @@
 import PageHeader from "@/components/PageHeader";
+import Modal, { ModalSubmit } from "@/components/Modal";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { fmtDate, money, toDateInput } from "@/lib/utils";
@@ -37,6 +38,39 @@ export default async function ExpensesPage() {
         title="Expenses"
         subtitle="Track deductible business expenses by category."
       >
+        <Modal triggerLabel="+ Add expense" title="Add an expense">
+          <form action={createExpense} className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Date</label>
+              <input name="date" type="date" defaultValue={toDateInput(new Date())} className="input" />
+            </div>
+            <div>
+              <label className="label">Category</label>
+              <select name="category" className="input">
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">Amount</label>
+              <input name="amount" type="number" step="0.01" defaultValue="0" className="input" />
+            </div>
+            <div>
+              <label className="label">Vendor</label>
+              <input name="vendor" className="input" />
+            </div>
+            <div className="col-span-2">
+              <label className="label">Notes</label>
+              <input name="notes" className="input" />
+            </div>
+            <div className="col-span-2">
+              <ModalSubmit>Add expense</ModalSubmit>
+            </div>
+          </form>
+        </Modal>
         <a href="/api/export/expenses" className="btn-secondary">
           Export CSV
         </a>
@@ -47,48 +81,6 @@ export default async function ExpensesPage() {
         <Stat label="Total (shown)" value={money(total)} />
         <Stat label="Categories used" value={byCat.size.toString()} />
       </div>
-
-      <details className="card mb-6 p-5" open>
-        <summary className="cursor-pointer text-sm font-semibold text-slate-700">
-          + Add an expense
-        </summary>
-        <form
-          action={createExpense}
-          className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4"
-        >
-          <div>
-            <label className="label">Date</label>
-            <input name="date" type="date" defaultValue={toDateInput(new Date())} className="input" />
-          </div>
-          <div>
-            <label className="label">Category</label>
-            <select name="category" className="input">
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label">Amount</label>
-            <input name="amount" type="number" step="0.01" defaultValue="0" className="input" />
-          </div>
-          <div>
-            <label className="label">Vendor</label>
-            <input name="vendor" className="input" />
-          </div>
-          <div className="col-span-2 sm:col-span-4">
-            <label className="label">Notes</label>
-            <input name="notes" className="input" />
-          </div>
-          <div className="col-span-2 sm:col-span-4">
-            <button className="btn-primary" type="submit">
-              Add expense
-            </button>
-          </div>
-        </form>
-      </details>
 
       <div className="card overflow-x-auto">
         <table className="w-full min-w-[600px]">

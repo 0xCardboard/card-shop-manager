@@ -1,5 +1,6 @@
 import Link from "next/link";
 import PageHeader from "@/components/PageHeader";
+import Modal, { ModalSubmit } from "@/components/Modal";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { money } from "@/lib/utils";
@@ -18,55 +19,46 @@ export default async function CustomersPage() {
         title="Customers"
         subtitle="Your CRM — contacts, tags, and lifetime spend from linked sales."
       >
+        <Modal triggerLabel="+ Add customer" title="Add a customer">
+          <form action={createCustomer} className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Name</label>
+              <input name="name" required className="input" />
+            </div>
+            <div>
+              <label className="label">Email</label>
+              <input name="email" type="email" className="input" />
+            </div>
+            <div>
+              <label className="label">Phone</label>
+              <input name="phone" className="input" />
+            </div>
+            <div>
+              <label className="label">Type</label>
+              <select name="type" className="input" defaultValue="Collector">
+                <option>Collector</option>
+                <option>Reseller</option>
+                <option>Wholesale</option>
+                <option>VIP</option>
+              </select>
+            </div>
+            <div className="col-span-2">
+              <label className="label">Tags (comma-separated)</label>
+              <input name="tags" className="input" placeholder="vintage, high-value" />
+            </div>
+            <div className="col-span-2">
+              <label className="label">Notes</label>
+              <input name="notes" className="input" />
+            </div>
+            <div className="col-span-2">
+              <ModalSubmit>Add customer</ModalSubmit>
+            </div>
+          </form>
+        </Modal>
         <a href="/api/export/customers" className="btn-secondary">
           Export CSV
         </a>
       </PageHeader>
-
-      <details className="card mb-6 p-5">
-        <summary className="cursor-pointer text-sm font-semibold text-slate-700">
-          + Add a customer
-        </summary>
-        <form
-          action={createCustomer}
-          className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3"
-        >
-          <div>
-            <label className="label">Name</label>
-            <input name="name" required className="input" />
-          </div>
-          <div>
-            <label className="label">Email</label>
-            <input name="email" type="email" className="input" />
-          </div>
-          <div>
-            <label className="label">Phone</label>
-            <input name="phone" className="input" />
-          </div>
-          <div>
-            <label className="label">Type</label>
-            <select name="type" className="input" defaultValue="Collector">
-              <option>Collector</option>
-              <option>Reseller</option>
-              <option>Wholesale</option>
-              <option>VIP</option>
-            </select>
-          </div>
-          <div>
-            <label className="label">Tags (comma-separated)</label>
-            <input name="tags" className="input" placeholder="vintage, high-value" />
-          </div>
-          <div className="col-span-2 sm:col-span-3">
-            <label className="label">Notes</label>
-            <input name="notes" className="input" />
-          </div>
-          <div className="col-span-2 sm:col-span-3">
-            <button className="btn-primary" type="submit">
-              Add customer
-            </button>
-          </div>
-        </form>
-      </details>
 
       <div className="card overflow-x-auto">
         <table className="w-full min-w-[760px]">

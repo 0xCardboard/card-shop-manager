@@ -41,6 +41,12 @@ database.
   passwords. Two roles: **ADMIN** (everything, including the Team page) and
   **STAFF** (everything except team management).
 - **Break down sealed product** — open a case/box into smaller units (see below).
+- **Quick add** — log purchases, sales, trades, expenses, customers, and leads
+  from a popup form opened by a single button on each page (no permanent form
+  cluttering the list).
+- **Search & filter** — the Inventory, Sales, and Trades pages have a search box
+  and filters (status / graded / outcome / platform) driven by the URL, so views
+  are bookmarkable.
 - **CSV export** — one click on any list page downloads a spreadsheet.
 
 ### Item lifecycle: Brazil → US → sold

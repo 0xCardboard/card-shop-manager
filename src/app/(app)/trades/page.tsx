@@ -1,12 +1,33 @@
 import PageHeader from "@/components/PageHeader";
+import Modal from "@/components/Modal";
+import FilterBar from "@/components/FilterBar";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { fmtDate, money } from "@/lib/utils";
 import TradeForm from "./TradeForm";
 import { deleteTrade } from "./actions";
 
-export default async function TradesPage() {
+export default async function TradesPage({
+  searchParams,
+}: {
+  searchParams: { q?: string };
+}) {
   await requireSession();
+  const q = (searchParams.q ?? "").trim();
+
+  const where = q
+    ? {
+        OR: [
+          { counterparty: { contains: q, mode: "insensitive" as const } },
+          { notes: { contains: q, mode: "insensitive" as const } },
+          {
+            legs: {
+              some: { itemName: { contains: q, mode: "insensitive" as const } },
+            },
+          },
+        ],
+      }
+    : {};
 
   const [items, trades] = await Promise.all([
     prisma.inventoryItem.findMany({
@@ -14,6 +35,7 @@ export default async function TradesPage() {
       orderBy: { name: "asc" },
     }),
     prisma.trade.findMany({
+      where,
       orderBy: { date: "desc" },
       include: { legs: true },
       take: 100,
@@ -32,16 +54,18 @@ export default async function TradesPage() {
       <PageHeader
         title="Trades"
         subtitle="Swap items for items (plus cash). Cost basis passes through to what you receive."
-      />
-
-      <details className="card mb-6 p-5" open>
-        <summary className="cursor-pointer text-sm font-semibold text-slate-700">
-          + Log a trade
-        </summary>
-        <div className="mt-4">
+      >
+        <Modal triggerLabel="+ Log trade" title="Log a trade">
           <TradeForm items={formItems} />
-        </div>
-      </details>
+        </Modal>
+      </PageHeader>
+
+      <FilterBar
+        action="/trades"
+        q={q}
+        placeholder="Search counterparty, item, notes…"
+        clearHref="/trades"
+      />
 
       <div className="space-y-3">
         {trades.length === 0 && (
