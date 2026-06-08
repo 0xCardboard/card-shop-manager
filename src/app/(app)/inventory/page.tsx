@@ -4,12 +4,16 @@ import PageHeader from "@/components/PageHeader";
 import SubmitOnChange from "@/components/SubmitOnChange";
 import FilterBar from "@/components/FilterBar";
 import Modal, { ModalSubmit } from "@/components/Modal";
+import RecordButtons from "./RecordButtons";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { fmtDate, money, toDateInput } from "@/lib/utils";
 import { deleteItem, deleteShipment, shipToUS, updateStatus } from "./actions";
+import { deletePurchase } from "@/app/(app)/purchases/actions";
+import { deleteSale } from "@/app/(app)/sales/actions";
+import { deleteTrade } from "@/app/(app)/trades/actions";
 
-type Filters = { q: string; status: string; graded: string; outcome: string };
+type Filters = { q: string; status: string; graded: string; type: string };
 
 // Search across the descriptive/identifier fields shared by every item.
 function nameSearch(q: string): Prisma.InventoryItemWhereInput {
@@ -37,11 +41,15 @@ const GRADED_FILTER_OPTS = [
   { value: "yes", label: "Graded only" },
   { value: "no", label: "Raw only" },
 ];
-const OUTCOME_FILTER_OPTS = [
-  { value: "", label: "Sold & broken down" },
-  { value: "SOLD", label: "Sold" },
-  { value: "BROKEN_DOWN", label: "Broken down" },
+const TYPE_FILTER_OPTS = [
+  { value: "", label: "All activity" },
+  { value: "purchase", label: "Purchases" },
+  { value: "sale", label: "Sales" },
+  { value: "trade", label: "Trades" },
+  { value: "shipment", label: "Shipments" },
+  { value: "breakdown", label: "Break downs" },
 ];
+const HISTORY_TYPES = ["purchase", "sale", "trade", "shipment", "breakdown"];
 
 // Statuses an item can be set to manually. SOLD and BROKEN_DOWN are outcomes of
 // recording a sale or breaking an item down — they land it in the History tab.
@@ -56,12 +64,8 @@ const ACTIVE_STATUSES: ItemStatus[] = [
   ItemStatus.LISTED,
   ItemStatus.RESERVED,
 ];
-const HISTORY_STATUSES: ItemStatus[] = [
-  ItemStatus.SOLD,
-  ItemStatus.BROKEN_DOWN,
-];
 
-type Tab = "brazil" | "us" | "shipments" | "history";
+type Tab = "brazil" | "us" | "history";
 
 export default async function InventoryPage({
   searchParams,
@@ -71,13 +75,12 @@ export default async function InventoryPage({
     q?: string;
     status?: string;
     graded?: string;
-    outcome?: string;
+    type?: string;
   };
 }) {
   await requireSession();
   const raw = searchParams?.tab;
-  const tab: Tab =
-    raw === "brazil" || raw === "shipments" || raw === "history" ? raw : "us";
+  const tab: Tab = raw === "brazil" || raw === "history" ? raw : "us";
   // Sanitize filter params against their allowed values so a stale/hand-edited
   // URL can't push an invalid enum into Prisma (which would throw a 500).
   const oneOf = (v: string | undefined, allowed: string[]) =>
@@ -86,10 +89,10 @@ export default async function InventoryPage({
     q: (searchParams.q ?? "").trim(),
     status: oneOf(searchParams.status, ["IN_STOCK", "LISTED", "RESERVED"]),
     graded: oneOf(searchParams.graded, ["yes", "no"]),
-    outcome: oneOf(searchParams.outcome, ["SOLD", "BROKEN_DOWN"]),
+    type: oneOf(searchParams.type, HISTORY_TYPES),
   };
 
-  const [brazilCount, usCount, shipmentsCount, historyCount] =
+  const [brazilCount, usCount, purchaseItems, saleItems, tradeItems, customers] =
     await Promise.all([
       prisma.inventoryItem.count({
         where: { status: { in: ACTIVE_STATUSES }, location: "BRAZIL" },
@@ -97,9 +100,25 @@ export default async function InventoryPage({
       prisma.inventoryItem.count({
         where: { status: { in: ACTIVE_STATUSES }, location: "US" },
       }),
-      prisma.shipment.count(),
-      prisma.inventoryItem.count({
-        where: { status: { in: HISTORY_STATUSES } },
+      // Data for the record-activity popups in the header.
+      prisma.inventoryItem.findMany({
+        where: { status: { in: ACTIVE_STATUSES } },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true, quantity: true },
+      }),
+      prisma.inventoryItem.findMany({
+        where: { quantity: { gt: 0 }, location: "US" },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true, quantity: true, costBasis: true },
+      }),
+      prisma.inventoryItem.findMany({
+        where: { quantity: { gt: 0 } },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true, quantity: true, costBasis: true },
+      }),
+      prisma.customer.findMany({
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
       }),
     ]);
 
@@ -109,6 +128,12 @@ export default async function InventoryPage({
         title="Inventory"
         subtitle="Track every card through its lifecycle: Brazil → ship to US → sold."
       >
+        <RecordButtons
+          purchaseItems={purchaseItems}
+          saleItems={saleItems}
+          customers={customers}
+          tradeItems={tradeItems}
+        />
         <a href="/api/export/inventory" className="btn-secondary">
           Export CSV
         </a>
@@ -121,17 +146,13 @@ export default async function InventoryPage({
         <TabLink href="/inventory?tab=us" active={tab === "us"}>
           In US <Count n={usCount} />
         </TabLink>
-        <TabLink href="/inventory?tab=shipments" active={tab === "shipments"}>
-          Shipments <Count n={shipmentsCount} />
-        </TabLink>
         <TabLink href="/inventory?tab=history" active={tab === "history"}>
-          History <Count n={historyCount} />
+          History
         </TabLink>
       </div>
 
       {tab === "brazil" && <BrazilTab filters={filters} />}
       {tab === "us" && <UsTab filters={filters} />}
-      {tab === "shipments" && <ShipmentsTab />}
       {tab === "history" && <HistoryTab filters={filters} />}
     </div>
   );
@@ -288,11 +309,8 @@ async function BrazilTab({ filters }: { filters: Filters }) {
             "No items in Brazil match your filters."
           ) : (
             <>
-              No inventory in Brazil. Items appear here when you{" "}
-              <a href="/purchases" className="font-medium text-brand-700">
-                log a purchase
-              </a>{" "}
-              with location set to Brazil.
+              No inventory in Brazil. Items appear here when you record a
+              purchase (button above) with location set to Brazil.
             </>
           )}
         </div>
@@ -392,12 +410,10 @@ async function UsTab({ filters }: { filters: Filters }) {
       />
 
       <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
-        Landed US inventory. Record a{" "}
-        <a href="/sales" className="font-medium text-brand-700">
-          sale
-        </a>{" "}
-        (wholesale or Whatnot), or <strong>break down</strong> a sealed item
-        into singles for Whatnot. Sold and broken-down items move to{" "}
+        Landed US inventory. Use <strong>+ Sale</strong> above to record a sale
+        (wholesale or Whatnot), or <strong>Break down</strong> a sealed item
+        into singles for Whatnot. Every sale, trade, shipment and break down is
+        logged in{" "}
         <Link href="/inventory?tab=history" className="font-medium text-brand-700">
           History
         </Link>
@@ -498,200 +514,298 @@ async function UsTab({ filters }: { filters: Filters }) {
 }
 
 // ── Shipments ───────────────────────────────────────────────────────────────
-async function ShipmentsTab() {
-  const shipments = await prisma.shipment.findMany({
-    orderBy: { date: "desc" },
-    include: { items: true },
-  });
+// ── History (unified activity feed) ─────────────────────────────────────────
+// Every event — purchase, sale, trade, shipment, break down — in one timeline,
+// each tagged with its type. Sales appear per-sale as they happen, even while
+// stock remains.
+const TAGS: Record<string, { label: string; cls: string }> = {
+  purchase: { label: "Purchase", cls: "bg-blue-100 text-blue-700" },
+  sale: { label: "Sale", cls: "bg-green-100 text-green-700" },
+  trade: { label: "Trade", cls: "bg-purple-100 text-purple-700" },
+  shipment: { label: "Shipment", cls: "bg-sky-100 text-sky-700" },
+  breakdown: { label: "Break down", cls: "bg-amber-100 text-amber-700" },
+};
 
-  const totalLanded = shipments.reduce(
-    (s, x) => s + x.shipping + x.tariffs + x.fees,
-    0
-  );
-
-  return (
-    <div>
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <Stat label="Shipments" value={shipments.length.toString()} />
-        <Stat label="Total landed cost" value={money(totalLanded)} />
-      </div>
-
-      <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
-        Each shipment moved a batch of items from Brazil to the US. The landed
-        cost (shipping + tariffs + fees) was folded into those items&apos; cost
-        basis. Deleting a shipment moves its items back to Brazil and reverses
-        the cost.
-      </div>
-
-      <div className="card overflow-x-auto">
-        <table className="w-full min-w-[820px]">
-          <thead className="border-b border-slate-200 bg-slate-50">
-            <tr>
-              <th className="th">Date</th>
-              <th className="th">Reference</th>
-              <th className="th">Items</th>
-              <th className="th">Shipping</th>
-              <th className="th">Tariffs</th>
-              <th className="th">Fees</th>
-              <th className="th">Landed total</th>
-              <th className="th"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {shipments.length === 0 && (
-              <tr>
-                <td className="td text-slate-400" colSpan={8}>
-                  No shipments yet. Ship items from the In Brazil tab.
-                </td>
-              </tr>
-            )}
-            {shipments.map((s) => (
-              <tr key={s.id}>
-                <td className="td">{fmtDate(s.date)}</td>
-                <td className="td">{s.reference || "—"}</td>
-                <td className="td text-slate-600">
-                  <div className="text-sm">
-                    {s.items.reduce((a, x) => a + x.quantity, 0)} units ·{" "}
-                    {s.items.length} {s.items.length === 1 ? "item" : "items"}
-                  </div>
-                  <div className="text-xs text-slate-400">
-                    {s.items.map((x) => x.itemName).slice(0, 4).join(", ")}
-                    {s.items.length > 4 ? "…" : ""}
-                  </div>
-                </td>
-                <td className="td">{money(s.shipping)}</td>
-                <td className="td">{money(s.tariffs)}</td>
-                <td className="td">{money(s.fees)}</td>
-                <td className="td font-medium">
-                  {money(s.shipping + s.tariffs + s.fees)}
-                </td>
-                <td className="td">
-                  <form action={deleteShipment}>
-                    <input type="hidden" name="id" value={s.id} />
-                    <button className="btn-danger py-1 text-xs">Delete</button>
-                  </form>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ── History ─────────────────────────────────────────────────────────────────
 async function HistoryTab({ filters }: { filters: Filters }) {
-  const { q, outcome } = filters;
-  const items = await prisma.inventoryItem.findMany({
-    where: {
-      status: outcome ? (outcome as ItemStatus) : { in: HISTORY_STATUSES },
-      ...nameSearch(q),
-    },
-    orderBy: [{ brokenDownAt: "desc" }, { updatedAt: "desc" }],
-    include: {
-      sales: { include: { customer: true }, orderBy: { date: "desc" } },
-      childItems: {
-        select: { id: true, name: true, internalSku: true, quantity: true },
-      },
-    },
-  });
+  const { q, type } = filters;
+  const want = (t: string) => !type || type === t;
+  const TAKE = 200;
+  const contains = q
+    ? { contains: q, mode: "insensitive" as const }
+    : undefined;
 
-  const soldItems = items.filter((i) => i.status === "SOLD");
-  const brokenItems = items.filter((i) => i.status === "BROKEN_DOWN");
-  const realizedProfit = soldItems.reduce(
-    (s, i) => s + i.sales.reduce((a, x) => a + x.profit, 0),
-    0
-  );
-  const filtered = Boolean(q || outcome);
+  const [purchases, sales, trades, shipments, broken] = await Promise.all([
+    want("purchase")
+      ? prisma.purchase.findMany({
+          where: contains
+            ? {
+                OR: [
+                  { itemName: contains },
+                  { source: contains },
+                  { notes: contains },
+                ],
+              }
+            : {},
+          orderBy: { date: "desc" },
+          take: TAKE,
+          include: { inventoryItem: { select: { internalSku: true } } },
+        })
+      : [],
+    want("sale")
+      ? prisma.sale.findMany({
+          where: contains
+            ? {
+                OR: [
+                  { platform: contains },
+                  { notes: contains },
+                  { inventoryItem: { name: contains } },
+                  { customer: { name: contains } },
+                ],
+              }
+            : {},
+          orderBy: { date: "desc" },
+          take: TAKE,
+          include: {
+            inventoryItem: { select: { name: true, internalSku: true } },
+            customer: { select: { name: true } },
+          },
+        })
+      : [],
+    want("trade")
+      ? prisma.trade.findMany({
+          where: contains
+            ? {
+                OR: [
+                  { counterparty: contains },
+                  { notes: contains },
+                  { legs: { some: { itemName: contains } } },
+                ],
+              }
+            : {},
+          orderBy: { date: "desc" },
+          take: TAKE,
+          include: { legs: true },
+        })
+      : [],
+    want("shipment")
+      ? prisma.shipment.findMany({
+          where: contains
+            ? {
+                OR: [
+                  { reference: contains },
+                  { notes: contains },
+                  { items: { some: { itemName: contains } } },
+                ],
+              }
+            : {},
+          orderBy: { date: "desc" },
+          take: TAKE,
+          include: { items: true },
+        })
+      : [],
+    want("breakdown")
+      ? prisma.inventoryItem.findMany({
+          where: { status: "BROKEN_DOWN", ...nameSearch(q) },
+          orderBy: [{ brokenDownAt: "desc" }, { updatedAt: "desc" }],
+          take: TAKE,
+          include: {
+            childItems: {
+              select: { id: true, name: true, internalSku: true, quantity: true },
+            },
+          },
+        })
+      : [],
+  ]);
+
+  type Ev = {
+    key: string;
+    date: Date;
+    type: string;
+    name: string;
+    sku: string | null;
+    details: React.ReactNode;
+    del?: React.ReactNode;
+  };
+  const events: Ev[] = [];
+
+  for (const p of purchases) {
+    events.push({
+      key: `p-${p.id}`,
+      date: p.date,
+      type: "purchase",
+      name: p.itemName,
+      sku: p.inventoryItem?.internalSku ?? null,
+      details: (
+        <span>
+          +{p.quantity} {p.quantity === 1 ? "unit" : "units"} · cost{" "}
+          {money(p.total)}
+          {p.source ? ` · ${p.source}` : ""}
+        </span>
+      ),
+      del: <DeleteForm action={deletePurchase} id={p.id} />,
+    });
+  }
+  for (const s of sales) {
+    events.push({
+      key: `s-${s.id}`,
+      date: s.date,
+      type: "sale",
+      name: s.inventoryItem?.name ?? "Misc sale",
+      sku: s.inventoryItem?.internalSku ?? null,
+      details: (
+        <div className="text-sm">
+          <div>
+            <span className="font-medium">{money(s.salePrice)}</span> for{" "}
+            {s.quantity} {s.quantity === 1 ? "unit" : "units"} ·{" "}
+            <span className={s.profit >= 0 ? "text-green-600" : "text-red-600"}>
+              {money(s.profit)} profit
+            </span>
+          </div>
+          {(s.platform || s.customer?.name) && (
+            <div className="text-xs text-slate-400">
+              {[s.platform, s.customer?.name].filter(Boolean).join(" · ")}
+            </div>
+          )}
+        </div>
+      ),
+      del: <DeleteForm action={deleteSale} id={s.id} />,
+    });
+  }
+  for (const t of trades) {
+    const gave = t.legs.filter((l) => l.direction === "GAVE");
+    const recv = t.legs.filter((l) => l.direction === "RECEIVED");
+    events.push({
+      key: `t-${t.id}`,
+      date: t.date,
+      type: "trade",
+      name: t.counterparty || "Trade",
+      sku: null,
+      details: (
+        <div className="text-sm">
+          <div className="text-xs">
+            <span className="text-slate-400">Gave:</span>{" "}
+            {gave.map((l) => `${l.quantity}× ${l.itemName}`).join(", ") ||
+              (t.cashOut > 0 ? `cash ${money(t.cashOut)}` : "—")}
+          </div>
+          <div className="text-xs">
+            <span className="text-slate-400">Received:</span>{" "}
+            {recv.map((l) => `${l.quantity}× ${l.itemName}`).join(", ") ||
+              (t.cashIn > 0 ? `cash ${money(t.cashIn)}` : "—")}
+          </div>
+          {t.realizedGain > 0 && (
+            <div className="text-xs text-emerald-600">
+              Realized gain {money(t.realizedGain)}
+            </div>
+          )}
+        </div>
+      ),
+      del: <DeleteForm action={deleteTrade} id={t.id} />,
+    });
+  }
+  for (const sh of shipments) {
+    const units = sh.items.reduce((a, x) => a + x.quantity, 0);
+    const landed = sh.shipping + sh.tariffs + sh.fees;
+    events.push({
+      key: `h-${sh.id}`,
+      date: sh.date,
+      type: "shipment",
+      name: sh.reference || "Shipment to US",
+      sku: null,
+      details: (
+        <span>
+          {units} {units === 1 ? "unit" : "units"} → US · landed {money(landed)}{" "}
+          <span className="text-xs text-slate-400">
+            (ship {money(sh.shipping)} · tariffs {money(sh.tariffs)}
+            {sh.fees ? ` · fees ${money(sh.fees)}` : ""})
+          </span>
+        </span>
+      ),
+      del: <DeleteForm action={deleteShipment} id={sh.id} />,
+    });
+  }
+  for (const b of broken) {
+    events.push({
+      key: `b-${b.id}`,
+      date: b.brokenDownAt ?? b.updatedAt,
+      type: "breakdown",
+      name: b.name,
+      sku: b.internalSku,
+      details: <BrokenDetails units={b.childItems} />,
+    });
+  }
+
+  events.sort((a, b) => b.date.getTime() - a.date.getTime());
+
+  const unitsSold = sales.reduce((s, x) => s + x.quantity, 0);
+  const realizedProfit = sales.reduce((s, x) => s + x.profit, 0);
+  const filtered = Boolean(q || type);
 
   return (
     <div>
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <Stat label="Sold items" value={soldItems.length.toString()} />
-        <Stat label="Broken down" value={brokenItems.length.toString()} />
-        <Stat label="Realized profit" value={money(realizedProfit)} />
+        <Stat label="Activity (shown)" value={events.length.toString()} />
+        <Stat label="Units sold (shown)" value={unitsSold.toString()} />
+        <Stat label="Realized profit (shown)" value={money(realizedProfit)} />
       </div>
 
-      <FilterBar
-        action="/inventory"
-        q={q}
-        placeholder="Search name, set, SKU…"
-        hidden={{ tab: "history" }}
-        selects={[
-          { name: "outcome", value: outcome, options: OUTCOME_FILTER_OPTS },
-        ]}
-        clearHref="/inventory?tab=history"
-      />
-
-      <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
-        Items that have left active stock. Sold items show the sale details;
-        broken-down items show the units they were opened into. Nothing here
-        counts toward your on-hand inventory value.
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <FilterBar
+          action="/inventory"
+          q={q}
+          placeholder="Search item, source, platform, customer…"
+          hidden={{ tab: "history" }}
+          selects={[{ name: "type", value: type, options: TYPE_FILTER_OPTS }]}
+          clearHref="/inventory?tab=history"
+        />
+        <div className="flex gap-2">
+          <a href="/api/export/sales" className="btn-secondary py-1 text-xs">
+            Export sales
+          </a>
+          <a href="/api/export/purchases" className="btn-secondary py-1 text-xs">
+            Export purchases
+          </a>
+        </div>
       </div>
 
       <div className="card overflow-x-auto">
         <table className="w-full min-w-[900px]">
           <thead className="border-b border-slate-200 bg-slate-50">
             <tr>
-              <th className="th">Card</th>
-              <th className="th">Internal SKU</th>
-              <th className="th">Outcome</th>
-              <th className="th">Details</th>
               <th className="th">Date</th>
+              <th className="th">Type</th>
+              <th className="th">Item</th>
+              <th className="th">Details</th>
+              <th className="th"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {items.length === 0 && (
+            {events.length === 0 && (
               <tr>
                 <td className="td text-slate-400" colSpan={5}>
                   {filtered
-                    ? "No history items match your filters."
-                    : "Nothing here yet. Sold and broken-down items will appear in this history."}
+                    ? "No activity matches your filters."
+                    : "Nothing here yet. Purchases, sales, trades, shipments and break downs will appear in this timeline."}
                 </td>
               </tr>
             )}
-            {items.map((i) => (
-              <tr key={i.id}>
-                <td className="td font-medium">
-                  {i.name}
-                  {i.graded && (
-                    <span className="badge ml-2 bg-amber-100 text-amber-700">
-                      {i.gradingCompany || "Graded"} {i.grade}
-                    </span>
-                  )}
-                  <div className="text-xs font-normal text-slate-400">
-                    {[i.setName, i.year, i.cardNumber ? `#${i.cardNumber}` : null]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </div>
-                </td>
+            {events.map((e) => (
+              <tr key={e.key}>
+                <td className="td whitespace-nowrap">{fmtDate(e.date)}</td>
                 <td className="td">
-                  <span className="font-mono text-xs text-slate-600">
-                    {i.internalSku || "—"}
+                  <span className={`badge ${TAGS[e.type].cls}`}>
+                    {TAGS[e.type].label}
                   </span>
                 </td>
-                <td className="td">
-                  {i.status === "SOLD" ? (
-                    <span className="badge bg-green-100 text-green-700">Sold</span>
-                  ) : (
-                    <span className="badge bg-amber-100 text-amber-700">
-                      Broken down
-                    </span>
+                <td className="td font-medium">
+                  {e.name}
+                  {e.sku && (
+                    <div className="font-mono text-[11px] font-normal text-slate-400">
+                      {e.sku}
+                    </div>
                   )}
                 </td>
-                <td className="td text-slate-600">
-                  {i.status === "SOLD" ? (
-                    <SoldDetails sales={i.sales} />
-                  ) : (
-                    <BrokenDetails units={i.childItems} />
-                  )}
-                </td>
-                <td className="td">
-                  {i.status === "SOLD"
-                    ? fmtDate(i.sales[0]?.date ?? i.updatedAt)
-                    : fmtDate(i.brokenDownAt ?? i.updatedAt)}
-                </td>
+                <td className="td text-slate-600">{e.details}</td>
+                <td className="td">{e.del}</td>
               </tr>
             ))}
           </tbody>
@@ -701,49 +815,18 @@ async function HistoryTab({ filters }: { filters: Filters }) {
   );
 }
 
-function SoldDetails({
-  sales,
+function DeleteForm({
+  action,
+  id,
 }: {
-  sales: {
-    quantity: number;
-    salePrice: number;
-    profit: number;
-    platform: string | null;
-    customer: { name: string } | null;
-  }[];
+  action: (formData: FormData) => Promise<void>;
+  id: string;
 }) {
-  if (sales.length === 0) {
-    return <span className="text-slate-400">Marked sold (no sale record)</span>;
-  }
-  const qty = sales.reduce((s, x) => s + x.quantity, 0);
-  const gross = sales.reduce((s, x) => s + x.salePrice, 0);
-  const profit = sales.reduce((s, x) => s + x.profit, 0);
-  const platforms = Array.from(
-    new Set(sales.map((s) => s.platform).filter(Boolean))
-  ).join(", ");
-  const customers = Array.from(
-    new Set(sales.map((s) => s.customer?.name).filter(Boolean))
-  ).join(", ");
-
   return (
-    <div className="text-sm">
-      <div>
-        <span className="font-medium">{money(gross)}</span> for {qty}{" "}
-        {qty === 1 ? "unit" : "units"}
-        {sales.length > 1 && (
-          <span className="text-slate-400"> · {sales.length} sales</span>
-        )}{" "}
-        ·{" "}
-        <span className={profit >= 0 ? "text-green-600" : "text-red-600"}>
-          {money(profit)} profit
-        </span>
-      </div>
-      {(platforms || customers) && (
-        <div className="text-xs text-slate-400">
-          {[platforms, customers].filter(Boolean).join(" · ")}
-        </div>
-      )}
-    </div>
+    <form action={action}>
+      <input type="hidden" name="id" value={id} />
+      <button className="btn-danger py-1 text-xs">Delete</button>
+    </form>
   );
 }
 
